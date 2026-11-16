@@ -194,9 +194,17 @@ class Layout:
     def event_columns(
         self, run: RunRecord, stream: str, fields: Sequence[str] = ()
     ) -> dict[str, list[Any]]:
-        """``seq_num``, ``time`` and the given scalar fields of a stream's events."""
+        """``seq_num``, ``time`` and the given scalar fields of a stream's events,
+        in ``seq_num`` order. Tiled returns table rows in storage order, which
+        for SQL-backed tables (PostgreSQL in the demo stack) is not the order
+        they were written in."""
         columns = ["seq_num", "time", *[f for f in fields if f not in {"seq_num", "time"}]]
-        return self.reader.table_columns(f"{run.path}/{stream}/{TABLE}", columns)
+        data = self.reader.table_columns(f"{run.path}/{stream}/{TABLE}", columns)
+        lengths = {len(values) for values in data.values()}
+        if len(lengths) > 1:
+            raise SourceError(HealthStatus.ERROR, "table columns of different lengths")
+        order = sorted(range(len(data["seq_num"])), key=lambda i: _sort_key(data, i))
+        return {name: [values[i] for i in order] for name, values in data.items()}
 
     def last_event_time(self, run: RunRecord) -> float | None:
         """Latest event time over all streams with scalar data. Reads each
@@ -213,6 +221,11 @@ class Layout:
             if times and (latest is None or max(times) > latest):
                 latest = max(times)
         return latest
+
+
+def _sort_key(data: Mapping[str, list[Any]], i: int) -> tuple[float, float]:
+    seq, t = _finite(data["seq_num"][i]), _finite(data["time"][i])
+    return (math.inf if seq is None else seq, math.inf if t is None else t)
 
 
 def _is_external(data_key: Any) -> bool:

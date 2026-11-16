@@ -137,6 +137,7 @@ def test_mouse_readings_view(api: tuple[TestClient, dict[str, Any]]) -> None:
     assert data["view"] == "readings" and not data["truncated"]
     measure = [r for r in data["rows"] if r["stream"] == "mouse_eiger_measure"]
     assert sorted({r["seq_num"] for r in measure}) == [1, 2, 3]
+    assert all(r["time"] > 1e12 for r in measure)  # milliseconds
     assert {r["field"] for r in measure} == {"roi", "stats"}
     summary = client.get(f"/runs/{uid}/data", params={"view": "summary"}).json()
     assert any(r["key"] == "sampleid" for r in summary["rows"])
@@ -154,6 +155,7 @@ def test_generic_fallback_time_series(api: tuple[TestClient, dict[str, Any]]) ->
     data = client.get(f"/runs/{uid}/data", params={"max_points": 10}).json()
     assert data["fields"] == ["env_temperature"] and len(data["rows"]) == 5
     assert data["decimation"]["every"] == 1 and data["rows"][0]["time"] > 1e12  # milliseconds
+    assert set(data["rows"][0]) == {"time", "field", "value"}
 
 
 def test_processing_run_has_no_plottable_data_yet(api: tuple[TestClient, dict[str, Any]]) -> None:
@@ -168,3 +170,23 @@ def test_health_reports_fetch_state(api: tuple[TestClient, dict[str, Any]]) -> N
     client.get("/clips", params=_window(manifest))
     [row] = client.get("/health").json()
     assert row["status"] == "ok" and row["last_success"] is not None and row["last_error"] is None
+
+
+def test_status_filter_and_reasons(api: tuple[TestClient, dict[str, Any]]) -> None:
+    client, manifest = api
+    params = {**_window(manifest), "status": "failed,aborted"}
+    clips = client.get("/clips", params=params).json()["clips"]
+    assert {c["status"] for c in clips} == {"failed", "aborted"}
+    assert all(c["reason"] for c in clips)
+    assert client.get("/clips", params={**params, "status": "running"}).status_code == 422
+
+
+def test_data_by_kind(api: tuple[TestClient, dict[str, Any]]) -> None:
+    client, manifest = api
+    mouse, generic = manifest["runs"]["inside"]["uid"], manifest["runs"]["generic_inside"]["uid"]
+    none = client.get(f"/runs/{mouse}/data", params={"kind": "timeseries"}).json()
+    assert (none["view"], none["rows"]) == (None, [])
+    series = client.get(f"/runs/{generic}/data", params={"kind": "timeseries"}).json()
+    assert series["view"] == "numeric" and len(series["rows"]) == 5
+    both = {"kind": "table", "view": "summary"}
+    assert client.get(f"/runs/{generic}/data", params=both).status_code == 422

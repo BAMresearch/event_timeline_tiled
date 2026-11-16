@@ -4,9 +4,9 @@ The contract between the adapter and the dashboards (plan §6.1). Fields are
 added, never redefined; incompatible changes are recorded in
 [migrations](migrations.md).
 
-- Times are **epoch seconds** (UTC), except the Grafana time fields of
-  `/clips/frame` and the `time` column of time-series data, which are
-  **milliseconds**.
+- Times are **epoch seconds** (UTC), except where Grafana displays them as
+  times: the time fields of `/clips/frame` and the `time` column of
+  `/runs/{uid}/data` rows are **milliseconds**.
 - Invalid input is refused with `422`; unknown runs, streams and views with
   `404`; a failing Tiled with `502` and a fixed category
   (`tiled unreachable: ConnectError`), never an upstream body.
@@ -26,7 +26,7 @@ One row per catalogue root.
 | `last_error`, `last_error_detail` | category of the last failed window fetch, `null` after a success |
 | `tiled_version`, `adapter_version`, `checked_at` | |
 
-## `GET /clips?from&to`
+## `GET /clips?from&to[&status]`
 
 Runs overlapping `[from, to)`: the de-duplicated union of a closed-run and an
 open-run search per root (plan §5.4).
@@ -50,7 +50,9 @@ Each clip:
 | `last_event`, `last_event_age_s`, `possibly_stalled` | inferred activity, open runs only (re-read at most every `ETT_ACTIVITY_REFRESH_S`) |
 | `stale` | the root could not be fetched; this is the last good data |
 | `label` | from the view table's label keys, else the short UID |
+| `reason` | the stop document's `reason`, if any |
 
+`status=failed,aborted` keeps only runs with those statuses.
 `truncated` is true when a root held more than `ETT_MAX_RUNS` runs in the
 window. `unplaceable` lists runs without a usable start time.
 
@@ -103,17 +105,23 @@ Kinds: `table`, `timeseries`, `summary`. View names in version 1:
 `readings`, `baseline` (MOUSE), `hinted`, `numeric`, `events`, `no_data`
 (fallback), `summary` (all runs).
 
-## `GET /runs/{uid}/data?view&max_points`
+## `GET /runs/{uid}/data?view|kind&max_points`
 
 Rows of one view (default view if `view` is omitted); `max_points` 10–20000,
 default 2000.
 
-- `table`: `{"rows": [{"stream", "seq_num", "time", "field", "value", "units"}], "truncated", "row_limit"}`,
+- `table`: `{"rows": [{"stream", "seq_num", "time": <ms>, "field", "value", "units"}], "truncated", "row_limit"}`,
   at most 2000 rows.
-- `timeseries`: one stream, `{"stream", "fields", "units", "rows": [{"time": <ms>, "<field>": value}],
-  "decimation": {"method", "every", "source_rows", "returned"}, "non_finite"}`. Decimation keeps
-  every k-th event and always the last; all rows are read from Tiled (it
-  cannot select rows), then decimated here.
+- `timeseries`: one stream, long format,
+  `{"stream", "fields", "units", "rows": [{"time": <ms>, "field", "value"}],
+  "decimation": {"method", "every", "source_rows", "returned"}, "non_finite"}`.
+  Infinity's `timeseries` query format turns the rows into one series per
+  field with a real time field (its auto-detection types a millisecond or
+  ISO time as a number or string, which Grafana's time-series panel cannot
+  use). Decimation keeps every k-th event and always the last; all rows are
+  read from Tiled (it cannot select rows), then decimated here.
+- `kind=table|timeseries|summary` instead of `view`: the first available
+  view of that kind, or no rows and a `reason` if the run has none.
 - `summary`: the metadata rows of `/runs/{uid}`.
 - An unavailable view returns no rows and its `reason`.
 

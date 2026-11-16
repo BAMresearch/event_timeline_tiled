@@ -68,5 +68,7 @@ def test_labels_and_stall_thresholds_come_from_the_table() -> None:
     assert label(run(instrument="MOUSE", sampleid="S-1", plan_name="m")) == "S-1 · m"
     assert label(run(instrument="other", plan_name="scan", scan_id=4)) == "scan · 4"
     assert label(run()) == "abcdef01"
+    processing = run(kind="modacor_correction", product="saxs", attempt=2, plan_name="modacor")
+    assert label(processing) == "saxs · attempt 2"
     assert stall_after_s(run(instrument="MOUSE")) == 1200
     assert stall_after_s(run(instrument="other")) == 1800

@@ -29,7 +29,8 @@ uv run --locked python deploy/smoke_test.py
 It checks, through the published proxy: anonymous API and image requests are
 refused; the provisioned health query returns `ok` through Grafana, Infinity
 and the adapter; `ett-check-access` passes inside the adapter container for a
-seeded run; and the adapter's key is refused a write. CI runs it on every
+seeded run; the adapter's key is refused a write; and every panel query of
+the timeline dashboard returns without error, with clips in the timeline. CI runs it on every
 push with generated secrets and removes the stack afterwards.
 
 ## PostgreSQL

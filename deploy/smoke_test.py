@@ -13,6 +13,8 @@ Checks, through the published proxy and inside the containers:
    real data readable);
 4. the adapter's key is refused a valid node-create request (this is the
    disposable demo Tiled, so a wrongly privileged key would only write there).
+5. every panel query of the timeline dashboard returns without error for a
+   seeded run, and the timeline frame has clips.
 
 Prints statuses only, never credentials. Exit status 0 if all pass.
 """
@@ -126,6 +128,28 @@ print(data[0]["id"] if data else "")
 """
 
 
+def panel_queries(run: str) -> list[tuple[str, int, str]]:
+    """(panel title, rows, error) for every query of the timeline dashboard."""
+    status, body = http("/api/dashboards/uid/ett-timeline")
+    if status != 200:
+        return [("dashboard", 0, f"HTTP {status}")]
+    now = time.time()
+    out = []
+    for panel in json.loads(body)["dashboard"]["panels"]:
+        for target in panel.get("targets", []):
+            query = dict(target, url=target["url"].replace("${run:percentencode}", run))
+            window = {"from": str(int((now - 86400) * 1000)), "to": str(int(now * 1000))}
+            status, body = http("/api/ds/query", {"queries": [query], **window})
+            if status != 200:
+                out.append((panel["title"], 0, f"HTTP {status}"))
+                continue
+            result = json.loads(body)["results"]["A"]
+            frames = result.get("frames", [])
+            rows = sum(len(f["data"]["values"][0]) for f in frames if f["data"]["values"])
+            out.append((panel["title"], rows, (result.get("error") or "")[:120]))
+    return out
+
+
 def main() -> None:
     failures = []
 
@@ -159,6 +183,12 @@ def main() -> None:
     result = in_adapter("python", "-c", WRITE_PROBE)
     status_text = result.stdout.strip()
     check("adapter key refused a write", status_text in {"401", "403"}, f"HTTP {status_text}")
+
+    results = panel_queries(run)
+    errors = [f"{title}: {error}" for title, _, error in results if error]
+    check("timeline dashboard queries", not errors, "; ".join(errors) or f"{len(results)} queries")
+    timeline_rows = dict((title, rows) for title, rows, _ in results).get("Timeline", 0)
+    check("timeline frame has clips", timeline_rows > 0, f"{timeline_rows} clips")
 
     if failures:
         sys.exit(f"{len(failures)} smoke check(s) failed: {', '.join(failures)}")

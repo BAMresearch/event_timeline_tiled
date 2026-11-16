@@ -41,7 +41,9 @@ class CatalogServer:
     uses SQLite, so that the same tests can run against PostgreSQL.
     """
 
-    def __init__(self, backend: str, catalog_uri: str, directory: Path) -> None:
+    def __init__(
+        self, backend: str, catalog_uri: str, directory: Path, table_storage: str | None = None
+    ) -> None:
         import uvicorn
         from tiled.catalog import from_uri as catalog_from_uri
         from tiled.config import Authentication, StreamingCacheConfig
@@ -55,7 +57,10 @@ class CatalogServer:
         (directory / "data").mkdir()
         catalog = catalog_from_uri(
             catalog_uri,
-            writable_storage=[directory / "data", f"duckdb:///{directory / 'storage.duckdb'}"],
+            writable_storage=[
+                directory / "data",
+                table_storage or f"duckdb:///{directory / 'storage.duckdb'}",
+            ],
             readable_storage=[self.processed_dir],
             init_if_not_exists=True,
             cache_config=StreamingCacheConfig(uri="memory").model_dump(),
@@ -137,11 +142,17 @@ def postgres_admin_url() -> Iterator[str]:
         subprocess.run(["docker", "stop", container], capture_output=True)
 
 
-def _postgres_catalog_uri(admin_url: str) -> str:
-    name = f"ett_test_{secrets.token_hex(4)}"
-    asyncio.run(_create_database(admin_url, name))
+def _postgres_databases(admin_url: str) -> tuple[str, str]:
+    """A fresh catalogue database and a fresh event-table database, as in the
+    demo stack (table rows then come back in storage order, not write order)."""
     parts = urlsplit(admin_url)
-    return urlunsplit(("postgresql+asyncpg", parts.netloc, f"/{name}", "", ""))
+    names = [f"ett_test_{secrets.token_hex(4)}" for _ in range(2)]
+    for name in names:
+        asyncio.run(_create_database(admin_url, name))
+    return (
+        urlunsplit(("postgresql+asyncpg", parts.netloc, f"/{names[0]}", "", "")),
+        urlunsplit(("postgresql", parts.netloc, f"/{names[1]}", "", "")),
+    )
 
 
 def _seed(url: str, api_key: str, processed: Path) -> dict[str, Any]:
@@ -189,11 +200,12 @@ def catalog_server(
 ) -> Iterator[tuple[CatalogServer, dict[str, Any]]]:
     """A Tiled server per catalogue backend, seeded with the window scenario."""
     directory = tmp_path_factory.mktemp(f"catalog-{request.param}")
+    tables = None
     if request.param == "postgresql":
-        uri = _postgres_catalog_uri(request.getfixturevalue("postgres_admin_url"))
+        uri, tables = _postgres_databases(request.getfixturevalue("postgres_admin_url"))
     else:
         uri = f"sqlite:///{directory / 'catalog.db'}"
-    server = CatalogServer(request.param, uri, directory)
+    server = CatalogServer(request.param, uri, directory, tables)
     try:
         yield server, _seed(server.url, server.api_key, server.processed_dir)
     finally:

@@ -54,6 +54,13 @@ def _json_value(value: Any) -> Any:
     return value
 
 
+def _ms(seconds: Any) -> int | None:
+    """Epoch seconds as integer milliseconds, ``None`` if not a finite number."""
+    if isinstance(seconds, bool) or not isinstance(seconds, int | float):
+        return None
+    return round(seconds * 1000) if math.isfinite(seconds) else None
+
+
 def _flatten(prefix: str, value: Any, out: list[tuple[str, Any]]) -> None:
     if isinstance(value, Mapping):
         for key in sorted(value, key=str):
@@ -135,10 +142,16 @@ def create_app(
 
     @app.get("/clips")
     def clips(
-        t_from: Annotated[float, Query(alias="from")], t_to: Annotated[float, Query(alias="to")]
+        t_from: Annotated[float, Query(alias="from")],
+        t_to: Annotated[float, Query(alias="to")],
+        status: Annotated[str | None, Query(pattern=r"^[a-z]+(,[a-z]+)*$")] = None,
     ) -> dict[str, Any]:
-        """Runs overlapping ``[from, to)``, one row per run (seconds)."""
+        """Runs overlapping ``[from, to)``, one row per run (seconds); ``status``
+        keeps only runs with one of these comma-separated statuses."""
         _window(t_from, t_to)
+        wanted = None if status is None else set(status.split(","))
+        if wanted is not None and not wanted <= {s.value for s in Status}:
+            raise HTTPException(422, f"status must be among {', '.join(s.value for s in Status)}")
         result = timeline.window(t_from, t_to)
         names = lane_names(sorted({c.lane_key for c in result.clips}, key=lambda k: k.as_text()))
         return {
@@ -147,6 +160,7 @@ def create_app(
             "clips": [
                 c.as_row(names[c.lane_key])
                 for c in sorted(result.clips, key=lambda c: (c.start, c.uid))
+                if wanted is None or c.status.value in wanted
             ],
             "truncated": result.truncated,
             "unplaceable": result.unplaceable,
@@ -286,12 +300,22 @@ def create_app(
     def run_data(
         uid: UID,
         view: Annotated[str | None, Query(pattern=r"^[a-z][a-z0-9_]*$")] = None,
+        kind: ViewKind | None = None,
         max_points: Annotated[int, Query(ge=10, le=20_000)] = 2000,
     ) -> dict[str, Any]:
-        """Rows for one view (the default if ``view`` is not given)."""
+        """Rows for one view: ``view`` by name, else the first available view of
+        ``kind``, else the default view."""
+        if view and kind:
+            raise HTTPException(422, "give view or kind, not both")
         run = find(uid)
         views = views_of(run)
-        chosen = next((v for v in views if (v.name == view if view else v.available)), None)
+        if kind is not None:
+            chosen = next((v for v in views if v.available and v.kind is kind), None)
+            if chosen is None:
+                return {"view": None, "kind": kind.value, "rows": [], "truncated": False,
+                        "reason": f"this run has no {kind.value} view"}  # fmt: skip
+        else:
+            chosen = next((v for v in views if (v.name == view if view else v.available)), None)
         if chosen is None:
             raise HTTPException(404, "no such view for this run")
         if not chosen.available:
@@ -324,7 +348,7 @@ def create_app(
                         {
                             "stream": name,
                             "seq_num": seq,
-                            "time": _json_value(columns["time"][i]),
+                            "time": _ms(columns["time"][i]),
                             "field": f,
                             "value": _json_value(columns[f][i]),
                             "units": view.units.get(f),
@@ -348,12 +372,15 @@ def create_app(
             if not isinstance(t, int | float) or not math.isfinite(t):
                 non_finite += 1
                 continue
-            row: dict[str, Any] = {"time": round(t * 1000)}
+            # Long format: Infinity's "timeseries" format turns it into one
+            # series per field, with a real time field (no dashboard transformation).
             for f in view.fields:
                 value = _json_value(columns[f][i])
                 non_finite += value is None
-                row[f] = value
-            rows.append(row)
+                rows.append({"time": round(t * 1000), "field": f, "value": value})
+        # Infinity converts long to wide only for ascending times; event times
+        # usually follow seq_num, but nothing guarantees it.
+        rows.sort(key=lambda r: r["time"])
         return {
             "view": view.name,
             "kind": view.kind.value,

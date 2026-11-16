@@ -18,7 +18,7 @@ from typing import Any
 from attrs import field, frozen, validators
 
 from .layout import RunRecord, StreamInfo
-from .run_state import Role
+from .run_state import Role, role_of
 
 VIEW_TABLE_VERSION = 1
 
@@ -140,6 +140,14 @@ def stall_after_s(run: RunRecord) -> float:
 
 
 def label(run: RunRecord) -> str:
+    """Processing runs: product and attempt (processing-run contract keys);
+    other runs: the instrument's label keys, else the fallback keys."""
+    if role_of(run.start) is Role.PROCESSING:
+        product, attempt = run.start.get("product"), run.start.get("attempt")
+        parts = [str(product) if product else "processing"]
+        if isinstance(attempt, int) and not isinstance(attempt, bool):
+            parts.append(f"attempt {attempt}")
+        return " · ".join(parts)
     entry = entry_for(run.start.get("instrument"))
     keys = entry.label_keys if entry else FALLBACK_LABEL_KEYS
     parts = [str(run.start[k]) for k in keys if run.start.get(k) not in (None, "")]

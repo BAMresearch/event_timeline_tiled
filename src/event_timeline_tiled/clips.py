@@ -88,6 +88,8 @@ class Clip:
     activity: Activity
     stale: bool
     label: str
+    reason: str | None = None
+    """The stop document's ``reason`` (failed and aborted runs)."""
 
     def as_row(self, lane: str) -> dict[str, Any]:
         return {
@@ -106,6 +108,7 @@ class Clip:
             "possibly_stalled": self.activity.possibly_stalled,
             "stale": self.stale,
             "label": self.label,
+            "reason": self.reason,
         }
 
 
@@ -126,6 +129,7 @@ def make_clip(run: RunRecord, activity: Activity, stale: bool, label: str) -> Cl
         activity=activity,
         stale=stale,
         label=label,
+        reason=_text((run.stop or {}).get("reason")),
     )
 
 

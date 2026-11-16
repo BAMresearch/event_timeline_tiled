@@ -9,6 +9,10 @@ cp deploy/.env.example deploy/.env      # replace every "change-me"
 docker compose -f deploy/compose.yaml --profile demo up -d --build
 ```
 
+Open <http://localhost:8080>, sign in as `admin` (password `GF_ADMIN_PASSWORD`
+from `deploy/.env`) and open the **Timeline** dashboard; the history appears
+within about two minutes of the first start.
+
 | Service | What it does |
 |---|---|
 | `proxy` | nginx on `127.0.0.1:8080`: Grafana, plus `/run-images/` for signed-in users |

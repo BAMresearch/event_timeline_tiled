@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from event_timeline_tiled.clips import frame
-from event_timeline_tiled.layout import Layout
+from event_timeline_tiled.layout import Layout, RunRecord
 from event_timeline_tiled.settings import Settings
 from event_timeline_tiled.tiled_http import TiledReader
 from event_timeline_tiled.timeline import Timeline
@@ -41,6 +41,9 @@ class Upstream:
         is_open = "filter[keypresent][condition][key]" in request.url.params
         data = [r for r in RUNS if ("stop" not in r["attributes"]["metadata"]) == is_open]
         return httpx.Response(200, json={"data": data, "links": {"next": None}})
+
+
+RUN_RECORD = RunRecord("", "r", {"uid": "r", "time": 0.0}, None)
 
 
 def _timeline(upstream: Upstream, clock: list[float]) -> Timeline:
@@ -78,3 +81,19 @@ def test_last_event_is_read_at_most_once_per_refresh_interval() -> None:
     clock[0] = 461.0
     [open_clip] = [c for c in timeline.window(0, 1000).clips if c.uid == "open"]
     assert upstream.table_reads == 2 and open_clip.activity.last_event == 350.0
+
+
+def test_event_columns_come_back_in_seq_num_order() -> None:
+    def shuffled(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"seq_num": [3, 1, 2], "time": [30.0, 10.0, 20.0], "x": [3, 1, 2]}
+        )
+
+    settings = Settings(tiled_url="http://tiled.test", tiled_api_key="k")
+    layout = Layout(TiledReader(settings, transport=httpx.MockTransport(shuffled)))
+    run = RUN_RECORD
+    assert layout.event_columns(run, "primary", ["x"]) == {
+        "seq_num": [1, 2, 3],
+        "time": [10.0, 20.0, 30.0],
+        "x": [1, 2, 3],
+    }

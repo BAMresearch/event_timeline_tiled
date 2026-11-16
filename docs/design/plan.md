@@ -653,6 +653,15 @@ presets in the browser; alerting; raw MOUSE detector frames.
   separate volumes, long-lived demo services as uid 10001, Docker only
   (decisions D-004, D-005).
 
+- Step 3 in progress (2026-11-16): adapter endpoints and the version 1
+  timeline dashboard built and checked on the demo stack. Found on the way:
+  Tiled's `links.next` drops search filters (§5.4); SQL-backed event tables
+  return rows in storage order, so the layout module sorts by `seq_num`;
+  Infinity types auto-detected time columns as numbers, so time-series data
+  is long format with Infinity's `timeseries` query format (no dashboard
+  transformation). Still to do in step 3: the 0.2.8 client check, query
+  plans on 0.2.21, and the queue-status panel.
+
 ## 15. Open questions
 
 None at the moment. Next: step 3, starting with the fixture and test items
