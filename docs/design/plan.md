@@ -659,8 +659,8 @@ presets in the browser; alerting; raw MOUSE detector frames.
   return rows in storage order, so the layout module sorts by `seq_num`;
   Infinity types auto-detected time columns as numbers, so time-series data
   is long format with Infinity's `timeseries` query format (no dashboard
-  transformation). Still to do in step 3: the 0.2.8 client check, query
-  plans on 0.2.21, and the queue-status panel.
+  transformation). The 0.2.8 client check and query plans on 0.2.21 are
+  done (decision D-006). Still to do in step 3: the queue-status panel.
 
 ## 15. Open questions
 

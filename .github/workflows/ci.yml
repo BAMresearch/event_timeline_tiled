@@ -58,6 +58,8 @@ jobs:
         run: docker compose -f deploy/compose.yaml --profile demo up -d --build
       - name: Smoke test
         run: uv run --locked python deploy/smoke_test.py
+      - name: MOUSE's Tiled 0.2.8 client against the stack's Tiled
+        run: uv run --locked python deploy/old_client_check.py
       - name: Logs on failure
         if: failure()
         run: docker compose -f deploy/compose.yaml --profile demo logs --tail 50

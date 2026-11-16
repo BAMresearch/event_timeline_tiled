@@ -33,6 +33,15 @@ seeded run; the adapter's key is refused a write; and every panel query of
 the timeline dashboard returns without error, with clips in the timeline. CI runs it on every
 push with generated secrets and removes the stack afterwards.
 
+```sh
+uv run --locked python deploy/old_client_check.py
+```
+
+writes runs with MOUSE's client stack (Tiled 0.2.8, Bluesky 1.14.6, in a
+throwaway environment inside the `demo-seed` image) into the stack's Tiled
+and checks that the adapter finds and reads them (decision D-006). CI runs
+it after the smoke test.
+
 ## PostgreSQL
 
 Search and endpoint contract tests run on both SQLite and PostgreSQL
