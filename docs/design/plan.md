@@ -660,7 +660,9 @@ presets in the browser; alerting; raw MOUSE detector frames.
   Infinity types auto-detected time columns as numbers, so time-series data
   is long format with Infinity's `timeseries` query format (no dashboard
   transformation). The 0.2.8 client check and query plans on 0.2.21 are
-  done (decision D-006). Still to do in step 3: the queue-status panel.
+  done (decision D-006). Queue status built: `/queues` over 0MQ or HTTP
+  through a read-only wrapper, a Queue panel, a real RE Manager in tests and
+  the demo stack ([queue status](../technical/queues.md)).
 
 ## 15. Open questions
 

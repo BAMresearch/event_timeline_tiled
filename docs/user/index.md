@@ -1,9 +1,10 @@
 # User guide
 
 The dashboards are for operators following the queue: which runs are
-recorded on which instrument, and with what status. They show **recorded
-runs**: what has reached Tiled. They do not show the queue itself yet; use
-`qserver status` for that until the queue-status panel arrives (plan §5.5).
+recorded on which instrument, and with what status. The timeline shows
+**recorded runs**: what has reached Tiled. The *Queue* panel shows what each
+RE Manager reports right now, which covers what Tiled cannot: a paused queue,
+or a plan that failed before it opened a run.
 
 Sign in to Grafana with your Viewer account and open **Timeline**.
 
@@ -21,8 +22,10 @@ Laid out like a video editor:
 - **Top right:** the selected run's data in its default view (for MOUSE
   measurements: the readings of `mouse_eiger_measure`, `snapshot` and
   `baseline`), and a time series when the run has one.
-- **Top right corner:** *Data age*, the seconds since the adapter last read
-  Tiled successfully.
+- **Top:** *Queue*, per instrument: the RE Manager's state (`idle`,
+  `executing_queue`, `paused`, or `unreachable` when it does not answer),
+  the running plan and the number of queued items; and *Data age*, the
+  seconds since the adapter last read Tiled successfully.
 
 **Selecting a run:** click its block on the timeline and choose *Select run*
 (or *Zoom to run* to fit the time range to it), or click its label in a

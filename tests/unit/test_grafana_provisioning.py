@@ -16,6 +16,7 @@ ADAPTER = "http://adapter:8000/"
 # dashboard variable stands for the run UID.
 ENDPOINTS = {
     "/health",
+    "/queues",
     "/clips",
     "/clips/frame",
     "/runs/{uid}",

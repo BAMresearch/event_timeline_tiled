@@ -11,6 +11,7 @@ browser ──► proxy (nginx) ──► Grafana ──► Infinity data source
 | Endpoints | `src/event_timeline_tiled/adapter/app.py` | The [endpoint contract](endpoints.md) |
 | Timeline | `src/event_timeline_tiled/timeline.py` | Window searches per root, activity of open runs, stale data, source state |
 | Clips | `src/event_timeline_tiled/clips.py` | Lane keys and names, sub-lanes, the Grafana frame |
+| Queue status | `src/event_timeline_tiled/queues.py` | Read-only RE Manager status ([queue status](queues.md)) |
 | Run state | `src/event_timeline_tiled/run_state.py` | Status, role and activity, defined once |
 | View table | `src/event_timeline_tiled/views.py` | The only instrument knowledge: views, labels, stall thresholds |
 | Layout | `src/event_timeline_tiled/layout.py` | The Bluesky-in-Tiled layout and query choices |

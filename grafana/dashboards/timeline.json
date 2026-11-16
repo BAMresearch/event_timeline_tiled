@@ -41,8 +41,8 @@
    "gridPos": {
     "x": 0,
     "y": 0,
-    "w": 18,
-    "h": 2
+    "w": 8,
+    "h": 4
    },
    "transparent": true,
    "options": {
@@ -51,13 +51,147 @@
    }
   },
   {
+   "type": "table",
+   "title": "Queue",
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 11,
+    "h": 4
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "table",
+     "url": "http://adapter:8000/queues",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "",
+     "columns": [
+      {
+       "selector": "instrument",
+       "text": "instrument",
+       "type": "string"
+      },
+      {
+       "selector": "items_in_queue",
+       "text": "items_in_queue",
+       "type": "number"
+      },
+      {
+       "selector": "running_plan",
+       "text": "running_plan",
+       "type": "string"
+      },
+      {
+       "selector": "state",
+       "text": "state",
+       "type": "string"
+      }
+     ]
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "no RE Manager configured"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "items_in_queue"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 120
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "instrument"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 110
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "state"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "idle": {
+            "color": "green",
+            "index": 0
+           },
+           "executing_queue": {
+            "color": "blue",
+            "index": 1
+           },
+           "paused": {
+            "color": "orange",
+            "index": 2
+           },
+           "unreachable": {
+            "color": "red",
+            "index": 3
+           },
+           "error": {
+            "color": "red",
+            "index": 4
+           }
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
    "type": "stat",
    "title": "Data age",
    "gridPos": {
-    "x": 18,
+    "x": 19,
     "y": 0,
-    "w": 6,
-    "h": 2
+    "w": 5,
+    "h": 4
    },
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
@@ -131,7 +265,7 @@
    "title": "Runs in range",
    "gridPos": {
     "x": 0,
-    "y": 2,
+    "y": 4,
     "w": 7,
     "h": 7
    },
@@ -281,7 +415,7 @@
    "title": "Failed and aborted",
    "gridPos": {
     "x": 7,
-    "y": 2,
+    "y": 4,
     "w": 5,
     "h": 7
    },
@@ -381,7 +515,7 @@
    "title": "Selected run",
    "gridPos": {
     "x": 0,
-    "y": 9,
+    "y": 11,
     "w": 7,
     "h": 7
    },
@@ -433,7 +567,7 @@
    "title": "Streams",
    "gridPos": {
     "x": 7,
-    "y": 9,
+    "y": 11,
     "w": 5,
     "h": 7
    },
@@ -515,7 +649,7 @@
    "title": "Run data (default view)",
    "gridPos": {
     "x": 12,
-    "y": 2,
+    "y": 4,
     "w": 12,
     "h": 7
    },
@@ -581,7 +715,7 @@
    "title": "Run time series",
    "gridPos": {
     "x": 12,
-    "y": 9,
+    "y": 11,
     "w": 12,
     "h": 7
    },
@@ -652,7 +786,7 @@
    "title": "Timeline",
    "gridPos": {
     "x": 0,
-    "y": 16,
+    "y": 18,
     "w": 24,
     "h": 12
    },

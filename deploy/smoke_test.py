@@ -15,6 +15,7 @@ Checks, through the published proxy and inside the containers:
    disposable demo Tiled, so a wrongly privileged key would only write there).
 5. every panel query of the timeline dashboard returns without error for a
    seeded run, and the timeline frame has clips.
+6. the demo RE Manager is reachable through /queues (read-only).
 
 Prints statuses only, never credentials. Exit status 0 if all pass.
 """
@@ -150,6 +151,13 @@ def panel_queries(run: str) -> list[tuple[str, int, str]]:
     return out
 
 
+QUEUES = """
+import httpx
+rows = httpx.get("http://localhost:8000/queues", timeout=30).json()
+print(rows[0]["state"] if rows else "no RE Manager configured")
+"""
+
+
 def main() -> None:
     failures = []
 
@@ -183,6 +191,12 @@ def main() -> None:
     result = in_adapter("python", "-c", WRITE_PROBE)
     status_text = result.stdout.strip()
     check("adapter key refused a write", status_text in {"401", "403"}, f"HTTP {status_text}")
+
+    wait(
+        "queue status of the demo RE Manager",
+        lambda: in_adapter("python", "-c", QUEUES).stdout.strip() in {"idle", "executing_queue"},
+        timeout_s=180,
+    )
 
     results = panel_queries(run)
     errors = [f"{title}: {error}" for title, _, error in results if error]

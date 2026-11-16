@@ -1,0 +1,26 @@
+# Demo RE Manager: only the demo plan may be queued.
+user_groups:
+  root:
+    allowed_plans:
+      - "demo_measurement"
+    forbidden_plans:
+      - ":^_"
+    allowed_devices:
+      - null
+    forbidden_devices:
+      - ":^_:?.*"
+    allowed_functions: []
+    forbidden_functions:
+      - null
+  primary:
+    allowed_plans:
+      - "demo_measurement"
+    forbidden_plans:
+      - null
+    allowed_devices:
+      - null
+    forbidden_devices:
+      - null
+    allowed_functions: []
+    forbidden_functions:
+      - null

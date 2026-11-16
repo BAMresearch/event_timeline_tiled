@@ -26,6 +26,21 @@ One row per catalogue root.
 | `last_error`, `last_error_detail` | category of the last failed window fetch, `null` after a success |
 | `tiled_version`, `adapter_version`, `checked_at` | |
 
+## `GET /queues`
+
+One row per RE Manager in `ETT_QUEUES` ([queue status](queues.md)), read at
+request time; `[]` if none is configured.
+
+| Field | Meaning |
+|---|---|
+| `instrument`, `transport` | as configured (`zmq` or `http`) |
+| `reachable` | the RE Manager answered now |
+| `state` | display value: `manager_state` if reachable, else `unreachable` or `error` |
+| `manager_state`, `re_state`, `environment_open`, `queue_stop_pending` | from the RE Manager's status; `null` when unreachable |
+| `running_plan`, `running_since` | name and start time (seconds) of the running item |
+| `items_in_queue`, `next_items` | queued items; names of the next three |
+| `last_success`, `data_age_s`, `error`, `error_detail` | when it last answered, and why not now |
+
 ## `GET /clips?from&to[&status]`
 
 Runs overlapping `[from, to)`: the de-duplicated union of a closed-run and an

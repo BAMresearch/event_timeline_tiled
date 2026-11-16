@@ -27,13 +27,18 @@ jobs:
 
   test:
     # One Python for now (requires-python >=3.14); widen together with the package.
-    # PostgreSQL contract tests join in step 3.
+    # PostgreSQL tests start their own database through Docker; the RE Manager
+    # tests need redis-server and fail without it here.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - name: Redis for the RE Manager tests
+        run: sudo apt-get update -q && sudo apt-get install -y -q redis-server
       - run: uv sync --locked --group test --extra testing
       - run: uv run --locked --no-sync pytest
+        env:
+          ETT_REQUIRE_REDIS: "1"
 
   stack:
     # Builds the images, starts the multi-user demo stack with generated secrets

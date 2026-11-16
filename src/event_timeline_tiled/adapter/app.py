@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException, Path, Query
 from .. import __version__
 from ..clips import frame, lane_key, lane_names
 from ..layout import Layout, RunRecord
+from ..queues import ApiFactory, QueueMonitor
 from ..run_state import Status, activity, role_of, status_of
 from ..settings import Settings
 from ..tiled_http import HealthStatus, SourceError, TiledReader
@@ -86,16 +87,23 @@ def create_app(
     settings: Settings,
     reader: TiledReader | None = None,
     clock: Callable[[], float] = time.time,
+    queue_api: ApiFactory | None = None,
 ) -> FastAPI:
     tiled = reader or TiledReader(settings)
     layout = Layout(tiled)
     timeline = Timeline(settings, layout, clock)
+    queues = (
+        QueueMonitor(settings.queues, queue_api, clock)
+        if queue_api
+        else QueueMonitor(settings.queues, clock=clock)
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
+            queues.close()
             tiled.close()
 
     app = FastAPI(title="event-timeline-tiled adapter", version=__version__, lifespan=lifespan)
@@ -139,6 +147,12 @@ def create_app(
                 }
             )
         return rows
+
+    @app.get("/queues")
+    def queue_status() -> list[dict[str, Any]]:
+        """One row per configured RE Manager (plan §5.5), read now. Unreachable
+        managers have ``reachable: false`` and no state, never "idle"."""
+        return queues.rows()
 
     @app.get("/clips")
     def clips(
