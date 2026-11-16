@@ -1,0 +1,142 @@
+{
+  "uid": "ett-health",
+  "title": "Timeline health",
+  "tags": [
+    "event-timeline-tiled"
+  ],
+  "schemaVersion": 41,
+  "editable": false,
+  "refresh": "10s",
+  "time": {
+    "from": "now-12h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Tiled, as the adapter sees it",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "timeline-adapter"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "timeline-adapter"
+          },
+          "type": "json",
+          "source": "url",
+          "parser": "backend",
+          "format": "table",
+          "url": "http://adapter:8000/health",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "root",
+              "text": "root",
+              "type": "string"
+            },
+            {
+              "selector": "status",
+              "text": "status",
+              "type": "string"
+            },
+            {
+              "selector": "latency_ms",
+              "text": "latency_ms",
+              "type": "number"
+            },
+            {
+              "selector": "detail",
+              "text": "detail",
+              "type": "string"
+            },
+            {
+              "selector": "tiled_version",
+              "text": "tiled_version",
+              "type": "string"
+            },
+            {
+              "selector": "adapter_version",
+              "text": "adapter_version",
+              "type": "string"
+            },
+            {
+              "selector": "checked_at",
+              "text": "checked_at",
+              "type": "timestamp_epoch_s"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(?!ok$).*",
+                      "result": {
+                        "color": "red",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    }
+  ]
+}

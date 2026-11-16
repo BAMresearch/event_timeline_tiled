@@ -1,0 +1,31 @@
+site_name: event-timeline-tiled
+theme: readthedocs
+nav:
+  - Home: index.md
+  - User guide:
+      - Overview: user/index.md
+  - Technical documentation:
+      - Overview: technical/index.md
+      - Demo stack: technical/demo-stack.md
+      - Tiled access: technical/tiled-access.md
+      - Development: technical/development.md
+      - Testing: technical/testing.md
+      - Contract migrations: technical/migrations.md
+  - Design:
+      - Plan: design/plan.md
+      - Decisions: design/decisions.md
+      - Processing runs: design/processing-runs.md
+      - Spike results: design/spike-results.md
+      - Reviews:
+          - "01 Architecture: brief": design/reviews/brief-01-architecture.md
+          - "01 Architecture: response": design/reviews/response-01-architecture.md
+          - "01 Architecture: disposition": design/reviews/disposition-01.md
+          - "02 Tiled access: brief": design/reviews/brief-02-tiled-access.md
+          - "02 Tiled access: response": design/reviews/response-02-tiled-access.md
+          - "02 Tiled access: disposition": design/reviews/disposition-02.md
+          - "03 Grafana: brief": design/reviews/brief-03-grafana-feasibility.md
+          - "03 Grafana: response": design/reviews/response-03-grafana-feasibility.md
+          - "03 Grafana: disposition": design/reviews/disposition-03.md
+          - "04 Scaffold: brief": design/reviews/brief-04-scaffold.md
+          - "04 Scaffold: response": design/reviews/response-04-scaffold.md
+          - "04 Scaffold: disposition": design/reviews/disposition-04.md

@@ -1,0 +1,25 @@
+# Python and tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv*/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+site/
+.DS_Store
+
+# Secrets: never commit real passwords, keys or deployment settings
+.env
+.env.*
+!.env.example
+*.key
+/secrets/
+
+# Data and process output
+*.h5
+*.hdf5
+*.log
+/data/

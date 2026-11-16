@@ -1,0 +1,10 @@
+apiVersion: 1
+datasources:
+  - name: Timeline adapter
+    uid: timeline-adapter
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    editable: false
+    jsonData:
+      allowedHosts:
+        - http://adapter:8000/

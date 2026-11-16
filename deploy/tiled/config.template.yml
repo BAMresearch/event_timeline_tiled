@@ -1,0 +1,30 @@
+# Demo-stack Tiled: multi-user like the lab server, catalogue and event tables
+# on PostgreSQL. Dollar-brace placeholders are filled from the environment by
+# entrypoint.py.
+authentication:
+  providers:
+    - provider: toy
+      authenticator: tiled.authenticators:DictionaryAuthenticator
+      args:
+        users_to_passwords:
+          admin: ${TILED_ADMIN_PASSWORD}
+  tiled_admins:
+    - provider: toy
+      id: admin
+  secret_keys:
+    - ${TILED_SECRET_KEY}
+  allow_anonymous_access: false
+database:
+  uri: postgresql+asyncpg://tiled:${POSTGRES_PASSWORD}@postgres:5432/auth
+  init_if_not_exists: true
+trees:
+  - path: /
+    tree: catalog
+    args:
+      uri: postgresql+asyncpg://tiled:${POSTGRES_PASSWORD}@postgres:5432/catalog
+      init_if_not_exists: true
+      writable_storage:
+        - /data/files
+        - postgresql://tiled:${POSTGRES_PASSWORD}@postgres:5432/storage
+      readable_storage:
+        - /data/processed

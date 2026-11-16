@@ -1,0 +1,158 @@
+# event-timeline-tiled stack. Docker Compose v2.20+ (Podman is untested: the proxy
+# relies on Docker's embedded DNS).
+#
+#   Demo (everything local, synthetic runs):
+#     cp deploy/.env.example deploy/.env   # then set the passwords
+#     docker compose -f deploy/compose.yaml --profile demo up -d --build
+#     open http://localhost:8080  (Grafana; sign in as admin)
+#
+#   Against an existing Tiled (e.g. the lab server): set ETT_TILED_URL in .env,
+#   install the read-only key as adapter.key in the directory ETT_SECRETS names
+#   (docs/technical/tiled-access.md), check it with
+#     docker compose -f deploy/compose.yaml run --rm --no-deps adapter ett-check-access
+#   and start without the demo profile.
+name: event-timeline-tiled
+
+services:
+  proxy:
+    image: nginx:1.27@sha256:6784fb0834aa7dbbe12e3d7471e69c290df3e6ba810dc38b34ae33d3c1c05f7d
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${ETT_HTTP_PORT:-8080}:8080"
+    depends_on: [grafana, adapter]
+    restart: unless-stopped
+
+  grafana:
+    build: ./grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:?set GF_ADMIN_PASSWORD in deploy/.env}
+      GF_SERVER_ROOT_URL: ${ETT_PUBLIC_URL:-http://localhost:8080/}
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+  adapter:
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: adapter
+    environment:
+      ETT_TILED_URL: ${ETT_TILED_URL:-http://tiled:8000}
+      ETT_TILED_API_KEY_FILE: /secrets/adapter.key
+      ETT_CATALOG_ROOTS: ${ETT_CATALOG_ROOTS:-}
+    volumes:
+      - ${ETT_SECRETS:-adapter-key}:/secrets:ro
+    depends_on:
+      demo-bootstrap:
+        condition: service_completed_successfully
+        required: false
+    restart: unless-stopped
+
+  # Demo profile: a disposable multi-user Tiled with synthetic runs ------------------
+
+  postgres:
+    profiles: [demo]
+    image: postgres:16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
+    environment:
+      POSTGRES_USER: tiled
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+    volumes:
+      - ./tiled/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tiled"]
+      interval: 3s
+      retries: 30
+
+  tiled:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: tiled
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TILED_ADMIN_PASSWORD: ${TILED_ADMIN_PASSWORD:?set TILED_ADMIN_PASSWORD in deploy/.env}
+      TILED_SECRET_KEY: ${TILED_SECRET_KEY:?set TILED_SECRET_KEY in deploy/.env}
+    volumes:
+      - tiled-files:/data/files
+      - processed:/data/processed:ro
+    ports:
+      - "127.0.0.1:${ETT_DEMO_TILED_PORT:-8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/api/v1/')"]
+      interval: 3s
+      retries: 60
+    restart: unless-stopped
+
+  # One-shot, as root: creates the service keys (each in its own volume, so the
+  # adapter never sees the seeder's key) and hands the key and processed volumes
+  # to uid 10001; everything long-lived runs as that user.
+  demo-bootstrap:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: demo-tools
+    command: ["ett-demo-bootstrap", "--tiled-url", "http://tiled:8000",
+              "--key-dir", "adapter=/keys/adapter", "--key-dir", "seeder=/keys/seeder",
+              "--owner", "10001:10001", "--chown-dir", "/data/processed"]
+    environment:
+      TILED_ADMIN_PASSWORD: ${TILED_ADMIN_PASSWORD}
+    user: root
+    volumes:
+      - adapter-key:/keys/adapter
+      - seeder-key:/keys/seeder
+      - processed:/data/processed
+    depends_on:
+      tiled:
+        condition: service_healthy
+
+  demo-seed:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: demo-tools
+    command: ["ett-demo-seed", "--tiled-url", "http://tiled:8000",
+              "--api-key-file", "/secrets/seeder.key",
+              "--processed-dir", "/data/processed", "--live"]
+    volumes:
+      - seeder-key:/secrets:ro
+      - processed:/data/processed
+    depends_on:
+      demo-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  demo-operando:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: demo-tools
+    command: ["ett-demo-seed", "--tiled-url", "http://tiled:8000",
+              "--api-key-file", "/secrets/seeder.key",
+              "--processed-dir", "/data/processed", "--scenario", "operando",
+              "--interval", "15"]
+    volumes:
+      - seeder-key:/secrets:ro
+      - processed:/data/processed
+    depends_on:
+      demo-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  grafana-data:
+  adapter-key:
+  seeder-key:
+  postgres-data:
+  tiled-files:
+  processed:

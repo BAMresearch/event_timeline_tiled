@@ -1,0 +1,126 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "event-timeline-tiled"
+dynamic = ["version"]
+description = "Read-only timeline of Bluesky runs in Tiled, shown as a Grafana dashboard"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE.md"]
+# Declared as tested: the pinned Tiled/Bluesky stack runs on 3.14 in CI.
+# Widen together with the CI matrix.
+requires-python = ">=3.14"
+dependencies = [
+    "tiled[client]>=0.2.21,<0.3",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "httpx>=0.27,<1",
+    "attrs>=24.2",
+    "numpy>=2,<3",
+    "pillow>=11,<14",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+# Demo stack and test fixtures: writes runs into a disposable Tiled.
+testing = [
+    "bluesky>=1.14.6,<1.15",
+    "bluesky-tiled-plugins>=2.0.2,<2.1",
+    "event-model>=1.23.1,<1.24",
+    "ophyd>=1.11,<1.12",
+    "h5py>=3.11,<4",
+]
+
+[project.urls]
+repository = "https://github.com/BAMresearch/event_timeline_tiled"
+issues = "https://github.com/BAMresearch/event_timeline_tiled/issues"
+
+[project.scripts]
+ett-adapter = "event_timeline_tiled.adapter.app:main"
+ett-check-access = "event_timeline_tiled.access_check:main"
+ett-demo-bootstrap = "event_timeline_tiled.testing.bootstrap:main"
+ett-demo-seed = "event_timeline_tiled.testing.seed:main"
+
+[dependency-groups]
+# A Tiled server with PostgreSQL support: tests and the demo stack's Tiled image.
+tiled-server = [
+    "tiled[server]>=0.2.21,<0.3",
+    "asyncpg>=0.30,<1",
+]
+test = [
+    "pytest>=8,<10",
+    "pyyaml>=6,<7",
+    {include-group = "tiled-server"},
+]
+lint = ["ruff>=0.11,<1", "mypy>=1.15,<3", "types-pyyaml>=6"]
+docs = ["mkdocs>=1.6,<2"]
+dev = [
+    {include-group = "test"},
+    {include-group = "lint"},
+    {include-group = "docs"},
+]
+
+[tool.uv]
+required-version = ">=0.12.19"
+# The stack tested together in the spike (docs/design/spike-results.md).
+# Raise these deliberately, with the PostgreSQL contract tests passing.
+constraint-dependencies = [
+    "tiled==0.2.21",
+    "bluesky==1.14.6",
+    "bluesky-tiled-plugins==2.0.2",
+    "event-model==1.23.1",
+    "ophyd==1.11.0",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "event_timeline_tiled.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+event_timeline_tiled = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "docker: needs a running Docker daemon (skipped without one)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:ophyd.*",
+    "ignore::DeprecationWarning:bluesky.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+# Design records and review responses are kept verbatim, code blocks included.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["event_timeline_tiled"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["bluesky.*", "ophyd.*", "tiled.*", "bluesky_tiled_plugins.*"]
+follow_untyped_imports = true
+
+# The fixture writers drive untyped Bluesky/ophyd APIs (plans, decorators,
+# RunEngine subscriptions); the adapter itself stays fully strict.
+[[tool.mypy.overrides]]
+module = ["event_timeline_tiled.testing.*"]
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
