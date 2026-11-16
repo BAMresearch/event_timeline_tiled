@@ -179,7 +179,11 @@ and are marked stale.
 Last successful data fetch, last attempt, age of the data shown, and a
 sanitised error category; partial failures (one search failed) are reported
 as such. Empty results ("no runs in this window") are distinct from
-unavailable data.
+unavailable data. The Timeline page shows this itself (*Data status*, from
+`/clips/status`): a root never read, a root failing now (its runs shown as
+last seen, each up to its own last observation), a truncated window and
+failed activity reads, per root. A failed activity read is reported as
+unknown activity, never turned into "possibly stalled".
 
 ### 5.4 Which runs are in the window
 
@@ -189,9 +193,15 @@ union of two server-side searches per configured catalogue root, each fully
 paged (review 02 found the earlier four-search union missed runs stopping
 exactly at `to`):
 
-1. **closed:** `start.time < to` and `stop.time ≥ from`;
-2. **open:** no `stop` key (`KeyPresent('stop', exists=False)`, not
-   `Eq('stop', None)`), `start.time < to` and `start.time ≥ to − horizon`.
+1. **open:** no `stop` key (`KeyPresent('stop', exists=False)`, not
+   `Eq('stop', None)`), `start.time < to` and `start.time ≥ to − horizon`;
+2. **closed:** `start.time < to` and `stop.time ≥ from`.
+
+The open search goes first, so a run closing between the two is found closed
+by the second (review 05); a key found by both is kept closed. The two
+searches are not one snapshot. Above `ETT_MAX_RUNS` per root, open runs are
+kept first, and the window is reported as truncated; each search asks for
+one item more than the cap, so exactly the cap is not truncation.
 
 The **open-run horizon** defaults to **21 days**: operando battery experiments
 run for up to 14 days, plus a margin. It is anchored to the window end, not to
@@ -329,6 +339,8 @@ use its backend parser (JSONata) only, and pass times with its macros
 | `GET /health` | last successful fetch, last attempt, data age, error category, versions |
 | `GET /clips?from&to&page` | per run: `uid, start_uid, uid_mismatch, lane_key, lane, role, start, stop, status, last_event, possibly_stalled, stale, label`, plus `truncated` |
 | `GET /clips/frame?from&to` | the timeline projection of section 8: final lane/sub-lane, `start_ms`, `end_ms`, `status`, hidden helpers. **Milliseconds**, because these are Grafana time fields; all other endpoints use seconds |
+| `GET /clips/status?from&to` | whether the window's data is complete, with one line per problem (section 5.3) |
+| `GET /selection/...?uid` | the run endpoints below for the dashboard's selected run, where an empty selection is not an error |
 | `GET /runs/{uid}` | summary + flattened start/stop metadata |
 | `GET /runs/{uid}/streams` | stream, event count (from the stop document when closed), first/last event time (from the `time` column, selected run only) |
 | `GET /runs/{uid}/streams/{stream}/fields` | field, dtype, shape, units, hinted |
@@ -397,8 +409,10 @@ running Grafana.
 - **Selection:** two tooltip data links, "Select run"
   (`?var-run=${__data.fields["uid"]}&${__url_time_range}`, keeping relative
   ranges like `now-12h`) and "Zoom to run" (`from`/`to` from
-  `clip_from_ms`/`clip_to_ms`, with a finite end for open runs and padding
-  for zero-length runs). Opening in the same tab; whether navigation avoids
+  `zoom_from_ms`/`zoom_to_ms`: the true extent `clip_from_ms`/`clip_to_ms`
+  padded by 5 %, at least 5 s, so also zero-length runs get a range). Panels
+  for the selected run read `/selection/...`, where an empty selection is
+  a normal state. Opening in the same tab; whether navigation avoids
   a full reload is a gate check, and one-click selection is not promised.
   The hidden variable `run` survives refreshes and stays selected when the
   run leaves the window.
@@ -419,7 +433,7 @@ running Grafana.
   Auto grid viewer proven to keep the layout, or small detail dashboards per
   view kind, linked from the overview. Dashboards test view kinds, never
   instrument names.
-- A header line: "Recorded runs from Tiled" and data age.
+- A header line: "Recorded runs from Tiled", and *Data status* (section 5.3).
 - The queue-status panel (section 5.5), top left, for each instrument with a
   configured RE Manager.
 
@@ -664,8 +678,17 @@ presets in the browser; alerting; raw MOUSE detector frames.
   through a read-only wrapper, a Queue panel, a real RE Manager in tests and
   the demo stack ([queue status](../technical/queues.md)).
 
+- Review 05 folded in 2026-11-16
+  ([disposition](reviews/disposition-05.md)): *Data status* on the Timeline
+  page (`/clips/status`), truncation by look-ahead with open runs kept
+  first, the open search before the closed one, per-root and per-run
+  observation times, failed activity reads reported and throttled,
+  `/selection/...` endpoints for an empty selection, per-stream table
+  columns, a strict point budget, bounded metadata, unique lane names,
+  padded zoom bounds, transport-level read-only queue tests, and a 30 s
+  refresh default until step 4 (decision D-007).
+
 ## 15. Open questions
 
-None at the moment. Step 3 built 2026-11-16; next: Codex review of step 3
-([brief 05](reviews/brief-05-vertical-slice.md)), then the operator trial
-(step 4) in a lab session.
+None at the moment. Step 3 built and reviewed 2026-11-16; next: the
+operator trial (step 4) in a lab session.

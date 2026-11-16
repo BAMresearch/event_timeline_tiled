@@ -3,6 +3,17 @@
 Short records of decisions made while building; the plan's §14 holds the
 maintainer's decisions from the design phase. Newest first.
 
+## D-007 — Timeline refresh stays at 30 s until the operator trial (2026-11-16)
+
+Plan §1 asks for a 5–10 s refresh. Each refresh of the Timeline dashboard
+runs four window requests (*Runs in range*, *Failed and aborted*, *Data
+status*, the timeline), each two searches per catalogue root, plus at most
+one activity read per open run per minute and the selected run's reads.
+On the demo stack (D-006) a window costs about 65 ms, so 10 s would be
+fine there, but the lab Tiled's cost is not measured yet. The default stays
+30 s, with 10 s in the refresh picker; step 4 measures the lab window queries
+and event-column reads per viewer and then sets the default.
+
 ## D-006 — Window search and old-client checks on Tiled 0.2.21 (2026-11-16)
 
 Measured on the demo stack (Tiled 0.2.21, PostgreSQL 16, multi-user), with
@@ -15,7 +26,8 @@ Measured on the demo stack (Tiled 0.2.21, PostgreSQL 16, multi-user), with
   6,523 rows removed). Open runs (`KeyPresent` compiles to
   `metadata #> '{stop}' IS NULL`) use the parent index (1.0 ms).
 - So the closed-run search grows with the whole catalogue, streams and tables
-  included, not with the root's runs. Fine for MOUSE for years; on a much
+  included, not with the root's runs. This is one measured scale point, not
+  proof that time filtering is indexed at any catalogue size. Fine for MOUSE for years; on a much
   larger catalogue, an index on `(parent, (metadata #> '{start,time}'))` or an
   upstream change to the ordering would be the fix. The 0.2.19 index change
   (`ix_nodes_metadata`, GIN `jsonb_path_ops`) does not take part in these

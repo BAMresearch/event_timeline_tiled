@@ -1,7 +1,7 @@
 # Testing
 
 ```sh
-uv run --locked pytest                 # everything (about 35 s, starts PostgreSQL)
+uv run --locked pytest                 # everything (about a minute, starts PostgreSQL)
 uv run --locked pytest tests/unit      # fast, no server started
 uv run --locked ruff check . && uv run --locked ruff format --check .
 uv run --locked mypy src
@@ -15,8 +15,8 @@ with HDF5 arrays.
 
 | Directory | What it tests |
 |---|---|
-| `tests/unit/` | Settings, run state, clips and lanes, the view table, stale data, the Tiled reader's status mapping (stubbed responses), Grafana provisioning and dashboards |
-| `tests/contract/` | Window search, paging and run reads (SQLite and PostgreSQL), every endpoint, `/health`, the access check and the fixture layout against a real Tiled |
+| `tests/unit/` | Settings, run state, clips and lanes (name collisions, zoom bounds), the view table, the Tiled reader's status mapping; against stubbed Tiled responses: stale data and source failures per root, activity-read failures and their cadence (also concurrent), search look-ahead and caps, a run closing between the two searches, `/clips/status`, point budgets and metadata limits; queue requests at the HTTP transport; Grafana provisioning and dashboards |
+| `tests/contract/` | Window search, paging and run reads (SQLite and PostgreSQL), every endpoint including `/selection/...` with and without a selection, a field shared by two streams with different units, the exact table row limit, `/health`, the access check, the fixture layout, and queue requests at the 0MQ transport against a real RE Manager |
 
 ## Stack smoke test
 
@@ -30,7 +30,10 @@ It checks, through the published proxy: anonymous API and image requests are
 refused; the provisioned health query returns `ok` through Grafana, Infinity
 and the adapter; `ett-check-access` passes inside the adapter container for a
 seeded run; the adapter's key is refused a write; and every panel query of
-the timeline dashboard returns without error, with clips in the timeline. CI runs it on every
+the timeline dashboard (collapsed rows included) returns without error with
+no run selected, with a MOUSE run and with the generic run selected, with
+clips in the timeline, a *Data status* row and a time series for the
+generic run. CI runs it on every
 push with generated secrets and removes the stack afterwards.
 
 ```sh
