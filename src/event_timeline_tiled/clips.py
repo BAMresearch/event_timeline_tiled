@@ -8,6 +8,7 @@ the final ``lane`` column, so lanes and sub-lanes are allocated here.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 from urllib.parse import quote
@@ -215,10 +216,12 @@ def frame(clips: Sequence[Clip], t_from: float, t_to: float) -> list[dict[str, A
       ``observed_at`` (the last successful fetch of their source), never
       before their start; a closed run without a usable stop time is drawn at
       its start. Clips shorter than :data:`MIN_DISPLAY_FRACTION` of the window
-      are widened.
-    - Sub-lanes: per lane, sorted by (display start, uid), each clip takes the
-      lowest sub-lane free at its display start; touching clips may share. No
-      clip is dropped. Every (lane, sub-lane) has its own final name.
+      are widened, but never over the next clip in their sub-lane: runs queued
+      back to back stay in one lane at every zoom level.
+    - Sub-lanes: per lane, sorted by (start, uid), each clip takes the lowest
+      sub-lane free at its start, by **true** extent; touching clips may share,
+      clips starting at the same instant may not. No clip is dropped. Every
+      (lane, sub-lane) has its own final name.
     - ``state``: the visible value (see :func:`display_state`).
     - ``clip_from_ms``/``clip_to_ms``: the true extent (open runs: up to
       ``observed_at``); ``zoom_from_ms``/``zoom_to_ms``: that extent padded,
@@ -227,7 +230,6 @@ def frame(clips: Sequence[Clip], t_from: float, t_to: float) -> list[dict[str, A
     names = lane_names([c.lane_key for c in clips])
     min_width = max(t_to - t_from, 0.0) * MIN_DISPLAY_FRACTION
     rows: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    ends: dict[LaneKey, list[float]] = {}
     final = _Names()
     for name in names.values():
         final.claim(name)
@@ -238,16 +240,30 @@ def frame(clips: Sequence[Clip], t_from: float, t_to: float) -> list[dict[str, A
             end = max(clip.observed_at if clip.observed_at is not None else clip.start, clip.start)
         else:
             end = clip.stop if clip.stop is not None and clip.stop >= clip.start else clip.start
-        extents.append((clip, clip.start, max(end, clip.start + min_width), end))
-    for clip, start, display_end, end in sorted(extents, key=lambda e: (e[1], e[0].uid)):
-        free = ends.setdefault(clip.lane_key, [])
-        for index, busy_until in enumerate(free):
-            if start >= busy_until:
-                free[index] = display_end
+        extents.append((clip, clip.start, end))
+    # Sub-lanes by true extent: (busy until, last start) per sub-lane.
+    busy: dict[LaneKey, list[tuple[float, float]]] = {}
+    placed: list[tuple[Clip, float, float, int]] = []
+    for clip, start, end in sorted(extents, key=lambda e: (e[1], e[0].uid)):
+        free = busy.setdefault(clip.lane_key, [])
+        for index, (busy_until, last_start) in enumerate(free):
+            if start >= busy_until and start > last_start:
+                free[index] = (end, start)
                 break
         else:
-            free.append(display_end)
+            free.append((end, start))
             index = len(free) - 1
+        placed.append((clip, start, end, index))
+    # Widen short clips up to the next start in their sub-lane (placed is in start order).
+    next_start: dict[tuple[LaneKey, int], float] = {}
+    display_ends: dict[int, float] = {}
+    for position in range(len(placed) - 1, -1, -1):
+        clip, start, end, index = placed[position]
+        limit = next_start.get((clip.lane_key, index), math.inf)
+        display_ends[position] = max(end, min(start + min_width, limit))
+        next_start[(clip.lane_key, index)] = start
+    for position, (clip, start, end, index) in enumerate(placed):
+        display_end = display_ends[position]
         if index == 0:
             lane = names[clip.lane_key]
         else:

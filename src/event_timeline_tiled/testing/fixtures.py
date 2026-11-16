@@ -225,8 +225,27 @@ class FixtureWriter:
             self._re.unsubscribe(token)
         return str(uids[0])
 
+    def unflushed_run(self, md: dict[str, Any], start: float, *, n_events: int = 3) -> str:
+        """An open run whose events are still in ``TiledWriter``'s batch: written
+        by a writer with a batch larger than the run, so its stream exists in
+        Tiled without a table (as for a running run before its first batch)."""
+        sig = self._signals["cell_voltage"]
+
+        @bpp.run_decorator(md=md)
+        def plan() -> Iterator[Any]:
+            for _ in range(n_events):
+                yield from bps.trigger_and_read([sig], name="primary")
+
+        writer = TiledWriter(self.client, batch_size=n_events + 1)
+        return self._write_captured(plan(), start, None, "success", writer=writer)
+
     def _write_captured(
-        self, plan: Any, start: float, stop: float | None, exit_status: ExitStatus
+        self,
+        plan: Any,
+        start: float,
+        stop: float | None,
+        exit_status: ExitStatus,
+        writer: TiledWriter | None = None,
     ) -> str:
         docs: list[Doc] = []
         token = self._re.subscribe(lambda name, doc: docs.append((name, copy.deepcopy(doc))))
@@ -242,7 +261,7 @@ class FixtureWriter:
                 doc["exit_status"] = exit_status
                 if exit_status != "success":
                     doc["reason"] = f"synthetic {exit_status}"
-            self._writer(name, doc)
+            (writer or self._writer)(name, doc)
         return str(docs[0][1]["uid"])
 
     # Processing runs --------------------------------------------------------------------
@@ -511,6 +530,14 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
         ),
         "expect_in_window": True,
         "expect_status": "success",
+    }
+    # Running, its events still in the writer's batch: streams without tables.
+    runs["open_unflushed"] = {
+        "uid": fw.unflushed_run(
+            {"facility": "BAM", "instrument": "generic", "station": "B"}, t0 + 1950
+        ),
+        "expect_in_window": True,
+        "expect_status": "open",
     }
     runs["no_instrument"] = {
         "uid": fw.scalar_run({"facility": "BAM"}, t0 + 1300, t0 + 1350),

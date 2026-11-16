@@ -208,7 +208,7 @@ class Layout:
         for SQL-backed tables (PostgreSQL in the demo stack) is not the order
         they were written in."""
         columns = ["seq_num", "time", *[f for f in fields if f not in {"seq_num", "time"}]]
-        data = self.reader.table_columns(f"{run.path}/{stream}/{TABLE}", columns)
+        data = self._table_columns(run, stream, columns)
         lengths = {len(values) for values in data.values()}
         if len(lengths) > 1:
             raise SourceError(HealthStatus.ERROR, "table columns of different lengths")
@@ -223,11 +223,27 @@ class Layout:
         for stream in self.streams(run):
             if not stream.has_table:
                 continue
-            column = self.reader.table_columns(f"{run.path}/{stream.name}/{TABLE}", ["time"])
+            column = self._table_columns(run, stream.name, ["time"])
             for t in (_finite(v) for v in column["time"]):
                 if t is not None and (latest is None or t > latest):
                     latest = t
         return latest
+
+    def _table_columns(
+        self, run: RunRecord, stream: str, columns: Sequence[str]
+    ) -> dict[str, list[Any]]:
+        """The stream's event table, or no rows if it does not exist yet.
+
+        ``TiledWriter`` creates a stream's table with its first batch of rows
+        (``batch_size`` rows, or at the stop document), so a listed stream of a
+        running run often has none: that is "no events written yet", not an
+        error."""
+        try:
+            return self.reader.table_columns(f"{run.path}/{stream}/{TABLE}", columns)
+        except SourceError as exc:
+            if exc.status is not HealthStatus.NOT_FOUND:
+                raise
+            return {name: [] for name in columns}
 
 
 def _sort_key(data: Mapping[str, list[Any]], i: int) -> tuple[float, float]:

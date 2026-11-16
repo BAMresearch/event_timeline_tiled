@@ -62,6 +62,27 @@ def test_frame_units_open_runs_and_widening() -> None:
     assert (rows["t"]["clip_from_ms"], rows["t"]["clip_to_ms"]) == (100_000, 100_500)
 
 
+def test_widening_never_covers_the_next_clip() -> None:
+    # Queued back to back: a 1 s rest, then a 17 s run 0.5 s later. In a 1 h
+    # window the rest is widened (7.2 s) only up to the next start, and both
+    # stay in one lane, as they do at 10 minutes.
+    rest, pulse = clip(run("r", 0, 1)), clip(run("p", 1.5, 18.5))
+    for window in (600, 3600):
+        rows = {r["uid"]: r for r in frame([rest, pulse], -window + 20, 20)}
+        assert rows["r"]["lane"] == rows["p"]["lane"] == "MOUSE", window
+        assert rows["r"]["stop"] <= rows["p"]["start"] == 1_500
+        assert (rows["p"]["start"], rows["p"]["stop"]) == (1_500, 18_500)
+    rows = {r["uid"]: r for r in frame([rest, pulse], 0, 3600)}
+    assert rows["r"]["stop"] == 1_500 and rows["r"]["clip_to_ms"] == 1_000
+
+
+def test_clips_starting_together_never_share_a_sub_lane() -> None:
+    a, b = clip(run("a", 100, 100)), clip(run("b", 100, 100))
+    rows = frame([a, b], 0, 10_000)
+    assert len({r["lane"] for r in rows}) == 2
+    assert all(r["stop"] - r["start"] == 20_000 for r in rows)
+
+
 def test_state_shows_inference_but_status_stays_recorded() -> None:
     stalled = clip(run("s", 0, None), Activity(10, 5000, True))
     stale = clip(run("x", 0, None), stale=True)

@@ -42,6 +42,10 @@ def test_open_and_aborted_runs(
 ) -> None:
     c = _client(tiled_server, tiled_base_url)
     assert "stop" not in c[window_manifest["runs"]["open_inside"]["uid"]].metadata
+    unflushed = c[window_manifest["runs"]["open_unflushed"]["uid"]]
+    assert "stop" not in unflushed.metadata and sorted(unflushed) == ["baseline", "primary"]
+    for stream in ("baseline", "primary"):  # no table before the first batch
+        assert "internal" not in unflushed[stream].base
     aborted = c[window_manifest["runs"]["aborted"]["uid"]].metadata["stop"]
     assert aborted["exit_status"] == "abort" and aborted["reason"]
 

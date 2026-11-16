@@ -629,6 +629,18 @@
         ]
        }
       ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "reason"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
      }
     ]
    }
@@ -869,7 +881,7 @@
    },
    "fieldConfig": {
     "defaults": {
-     "noValue": "no run selected"
+     "noValue": "\u2013"
     },
     "overrides": []
    }
@@ -1076,7 +1088,7 @@
    "fieldConfig": {
     "defaults": {
      "displayName": "${__field.labels.field}",
-     "noValue": "no time-series view for this run",
+     "noValue": "nothing to plot (see the line above)",
      "custom": {
       "drawStyle": "line",
       "showPoints": "auto"
@@ -1534,7 +1546,44 @@
       "defaults": {
        "noValue": "choose a stream in Streams"
       },
-      "overrides": []
+      "overrides": [
+       {
+        "matcher": {
+         "id": "byName",
+         "options": "units"
+        },
+        "properties": [
+         {
+          "id": "noValue",
+          "value": "\u2013"
+         }
+        ]
+       },
+       {
+        "matcher": {
+         "id": "byName",
+         "options": "shape"
+        },
+        "properties": [
+         {
+          "id": "noValue",
+          "value": "\u2013"
+         }
+        ]
+       },
+       {
+        "matcher": {
+         "id": "byName",
+         "options": "dtype"
+        },
+        "properties": [
+         {
+          "id": "noValue",
+          "value": "\u2013"
+         }
+        ]
+       }
+      ]
      }
     }
    ]

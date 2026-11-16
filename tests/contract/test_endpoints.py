@@ -269,6 +269,36 @@ def test_selection_endpoints(api: tuple[TestClient, dict[str, Any]]) -> None:
     assert data["notice"].startswith("Readings: ")
     fields = client.get("/selection/fields", params={"uid": uid, "stream": "baseline"}).json()
     assert fields == client.get(f"/runs/{uid}/streams/baseline/fields").json()
-    # An unknown run is still an error; a malformed one is refused.
-    assert client.get("/selection/run", params={"uid": "no-such-run"}).status_code == 404
+    # A run this Tiled does not have (a bookmark, a shared link): a message, no
+    # error. /runs/{uid} still answers 404; a malformed uid is refused.
+    gone = client.get("/selection/run", params={"uid": "no-such-run"}).json()
+    assert (gone["selected"], gone["found"]) == (True, False)
+    assert gone["summary"][0]["value"].startswith("The selected run is not in Tiled")
+    assert client.get("/selection/streams", params={"uid": "no-such-run"}).json() == []
+    assert (
+        client.get("/selection/fields", params={"uid": "no-such-run", "stream": "x"}).json() == []
+    )
+    gone_data = client.get("/selection/data", params={"uid": "no-such-run"}).json()
+    assert (gone_data["rows"], gone_data["notice"]) == ([], gone["summary"][0]["value"])
+    assert client.get("/runs/no-such-run").status_code == 404
     assert client.get("/selection/run", params={"uid": "a/b"}).status_code == 422
+
+
+def test_open_run_before_its_first_batch(api: tuple[TestClient, dict[str, Any]]) -> None:
+    """TiledWriter writes event rows in batches: a running run's streams exist
+    before their tables do. That is "no events yet", not an error."""
+    client, manifest = api
+    uid = manifest["runs"]["open_unflushed"]["uid"]
+    clips = {c["uid"]: c for c in client.get("/clips", params=_window(manifest)).json()["clips"]}
+    assert clips[uid]["status"] == "open" and clips[uid]["activity_error"] is None
+    assert clips[uid]["last_event"] is None and clips[uid]["possibly_stalled"] is False
+    status = client.get("/clips/status", params=_window(manifest)).json()
+    assert status["state"] == "complete", status["issues"]
+    streams = client.get("/selection/streams", params={"uid": uid}).json()
+    assert {(s["stream"], s["events"], s["last_event"]) for s in streams} == {
+        ("baseline", 0, None),
+        ("primary", 0, None),
+    }
+    for kind in ("table", "timeseries"):
+        data = client.get("/selection/data", params={"uid": uid, "kind": kind}).json()
+        assert data["rows"] == [] and data["notice"].endswith("(none in Tiled yet)"), kind

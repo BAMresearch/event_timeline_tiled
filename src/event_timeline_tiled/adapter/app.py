@@ -49,6 +49,9 @@ METADATA_MAX_CHARS = 2000
 DATA_CACHE_S = 5.0
 """A view's rows are reused for this long (several panels read the same view)."""
 NO_SELECTION = "Select a run on the timeline or in Runs in range"
+# A selection from a bookmark, a shared link or another Tiled: a message, not an error.
+NOT_FOUND = "The selected run is not in Tiled (under the configured roots): select another"
+NOT_WRITTEN = " (none in Tiled yet)"
 
 
 def _window(t_from: float, t_to: float) -> None:
@@ -562,6 +565,8 @@ def create_app(
             if truncated:
                 break
         notice = f"{view.title}: {len(rows)} rows"
+        if not rows and run.stop is None:
+            notice += NOT_WRITTEN
         if truncated:
             notice = f"{view.title}: only the first {TABLE_ROW_LIMIT} rows are shown"
         return {"view": view.name, "kind": view.kind.value, "rows": rows,
@@ -605,6 +610,8 @@ def create_app(
         notice = f"{view.title} of {stream}: {len(indices)} of {n} events"
         if fields_cut:
             notice += f", first {len(fields)} of {len(view.fields)} fields"
+        if n == 0 and run.stop is None:
+            notice += NOT_WRITTEN
         return {
             "view": view.name,
             "kind": view.kind.value,
@@ -628,22 +635,37 @@ def create_app(
     # The dashboard's selection -----------------------------------------------------------
     # The same reads as /runs/{uid}/..., with the run (and stream) as query
     # parameters that may be empty: nothing selected is a normal state of the
-    # dashboard, not an error. An unknown run is still a 404.
+    # dashboard, not an error, and so is a selected run that this Tiled does
+    # not have (a bookmark, a shared link, a run from another server).
+
+    def selection(uid: str) -> RunRecord | None:
+        try:
+            return find(uid) if uid else None
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                return None
+            raise
 
     @app.get("/selection/run")
     def selected_run(uid: SELECTED = "") -> dict[str, Any]:
-        if not uid:
-            return {"selected": False, "summary": [{"key": "run", "value": NO_SELECTION}]}
-        summary = summary_of(find(uid))
-        return {"selected": True, "run": summary, "summary": summary_rows(summary)}
+        run = selection(uid)
+        if run is None:
+            message = NOT_FOUND if uid else NO_SELECTION
+            return {"selected": bool(uid), "found": False,
+                    "summary": [{"key": "run", "value": message}]}  # fmt: skip
+        summary = summary_of(run)
+        return {"selected": True, "found": True, "run": summary,
+                "summary": summary_rows(summary)}  # fmt: skip
 
     @app.get("/selection/streams")
     def selected_streams(uid: SELECTED = "") -> list[dict[str, Any]]:
-        return streams_of(find(uid)) if uid else []
+        run = selection(uid)
+        return streams_of(run) if run is not None else []
 
     @app.get("/selection/fields")
     def selected_fields(uid: SELECTED = "", stream: SELECTED = "") -> list[dict[str, Any]]:
-        return fields_of(find(uid), stream) if uid and stream else []
+        run = selection(uid) if stream else None
+        return fields_of(run, stream) if run is not None else []
 
     @app.get("/selection/data")
     def selected_data(
@@ -654,9 +676,11 @@ def create_app(
     ) -> dict[str, Any]:
         if view and kind:
             raise HTTPException(422, "give view or kind, not both")
-        if not uid:
-            return {"view": None, "rows": [], "truncated": False, "notice": NO_SELECTION}
-        return data_of(find(uid), view, kind, max_points)
+        run = selection(uid)
+        if run is None:
+            notice = NOT_FOUND if uid else NO_SELECTION
+            return {"view": None, "rows": [], "truncated": False, "notice": notice}
+        return data_of(run, view, kind, max_points)
 
     return app
 

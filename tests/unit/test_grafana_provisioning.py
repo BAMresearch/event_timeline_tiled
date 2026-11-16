@@ -121,6 +121,32 @@ def test_timeline_shows_whether_its_data_is_complete() -> None:
     assert {"status", "last_error", "data_age_s"} <= selected
 
 
+# Columns the adapter may return as null (docs/technical/endpoints.md), per table.
+NULLABLE = {
+    "Failed and aborted": {"reason"},
+    "Streams": {"last_event"},
+    "Run data (default view)": {"units", "value", "time"},
+    "Fields of ${stream}": {"units", "shape", "dtype"},
+}
+
+
+def test_null_cells_never_show_the_empty_panel_text() -> None:
+    """A table's default ``noValue`` also fills null cells: the text meant for an
+    empty panel ("none in range") would appear as a value. Nullable columns
+    override it with a dash; the notice line never claims a selection state."""
+    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
+    panels = {p["title"]: p for p in _panels(timeline)}
+    for title, nullable in NULLABLE.items():
+        overrides = {
+            o["matcher"]["options"]
+            for o in panels[title]["fieldConfig"]["overrides"]
+            if {"id": "noValue", "value": "\u2013"} in o["properties"]
+        }
+        assert nullable <= overrides, title
+    [notice] = [p for p in _panels(timeline) if p["type"] == "stat" and not p["title"]]
+    assert notice["fieldConfig"]["defaults"]["noValue"] == "\u2013"
+
+
 @pytest.mark.parametrize("path", DASHBOARDS, ids=lambda p: p.name)
 def test_dashboard_has_no_secrets_or_instrument_tests(path: Path) -> None:
     text = path.read_text()
