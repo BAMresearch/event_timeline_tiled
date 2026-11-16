@@ -171,8 +171,9 @@ class TiledReader:
         max_items: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """All entries of one container matching ``queries`` (AND), paged at
-        :data:`PAGE_LIMIT`. Returns ``(items, truncated)``; ``truncated`` is true
-        if ``max_items`` stopped the paging early.
+        :data:`PAGE_LIMIT`. Returns ``(items, truncated)``: at most ``max_items``
+        items, and ``truncated`` true only if more matched. To tell "exactly
+        ``max_items``" from "more", it asks for one item more than it returns.
 
         Tiled 0.2.21's ``links.next`` keeps only the paging parameters
         (``page[cursor]``, ``page[limit]``) and drops the filters and ``fields``.
@@ -187,12 +188,14 @@ class TiledReader:
         }
         items: list[dict[str, Any]] = []
         while True:
+            if max_items is not None:
+                params["page[limit]"] = min(PAGE_LIMIT, max_items + 1 - len(items))
             body = self.get_json(url, params)
             data, links = body.get("data"), body.get("links")
             if not isinstance(data, list) or not isinstance(links, dict):
                 raise SourceError(HealthStatus.ERROR, "response is not a Tiled search page")
             items.extend(item for item in data if isinstance(item, dict))
-            if max_items is not None and len(items) >= max_items:
+            if max_items is not None and len(items) > max_items:
                 return items[:max_items], True
             next_link = links.get("next")
             if not next_link or not data:

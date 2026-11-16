@@ -2,11 +2,17 @@
 
 The adapter reads each configured RE Manager through ``bluesky-queueserver-api``
 (0MQ straight to the RE Manager, or HTTP through Bluesky HTTP Server). The
-0MQ interface does not restrict a client to read-only calls, so the API
-object is wrapped in :class:`ReadOnlyQueue`, which keeps only the two read
-calls and never the API object itself. Do not widen it. Over HTTP the server
-also enforces read-only access through an API key limited to ``read:status``
-and ``read:queue``.
+adapter's code uses the API only through :class:`ReadOnlyQueue`, which offers
+the two read calls (``status``, ``queue_get``) and ``close``. Do not widen it.
+
+The wrapper narrows what the adapter's code *uses*; it is not a security
+boundary: its bound methods still reference the API object, which has the
+control calls. What keeps the adapter read-only is that it never calls
+anything else, and tests record every request it sends at the transport
+level (0MQ and HTTP) and allow only ``status`` and ``queue_get``. Enforcement
+outside the adapter exists only over HTTP, where the server's API key is
+limited to ``read:status`` and ``read:queue``; the 0MQ control port accepts
+any command from anyone who can reach it.
 
 An RE Manager that cannot be reached is reported as unreachable, never idle.
 """
@@ -23,7 +29,9 @@ from attrs import define, field
 from .settings import QueueConfig
 
 READ_ONLY_INTERFACE = frozenset({"instrument", "transport", "status", "queue", "close"})
-"""Everything :class:`ReadOnlyQueue` exposes; a test keeps it that way."""
+"""Everything :class:`ReadOnlyQueue` offers; a test keeps it that way."""
+READ_REQUESTS = frozenset({"status", "queue_get"})
+"""The only requests the adapter sends to an RE Manager (checked at the transport by tests)."""
 
 ApiFactory = Callable[[QueueConfig], Any]
 
@@ -44,7 +52,7 @@ def _make_api(config: QueueConfig) -> Any:  # the API package is untyped
 
 
 class ReadOnlyQueue:
-    """One RE Manager's status and queue. Only reads are reachable."""
+    """One RE Manager's status and queue: the only calls the adapter makes."""
 
     __slots__ = ("_close", "_lock", "_queue_get", "_status", "instrument", "transport")
 
@@ -52,7 +60,8 @@ class ReadOnlyQueue:
         api = factory(config)
         self.instrument = config.instrument
         self.transport = config.transport
-        # Keep the two read calls (and close); drop the API object.
+        # Keep the two read calls and close, not the API object as an attribute.
+        # (The bound methods still reference it: a narrow interface, not a sandbox.)
         self._status: Callable[..., Mapping[str, Any]] = api.status
         self._queue_get: Callable[..., Mapping[str, Any]] = api.queue_get
         self._close: Callable[[], None] = api.close

@@ -31,6 +31,16 @@
      "text": "",
      "value": ""
     }
+   },
+   {
+    "name": "stream",
+    "type": "textbox",
+    "hide": 2,
+    "query": "",
+    "current": {
+     "text": "",
+     "value": ""
+    }
    }
   ]
  },
@@ -41,22 +51,22 @@
    "gridPos": {
     "x": 0,
     "y": 0,
-    "w": 8,
+    "w": 6,
     "h": 4
    },
    "transparent": true,
    "options": {
     "mode": "markdown",
-    "content": "**Recorded runs from Tiled.** Click a run on the timeline or in *Runs in range* to select it. Colours: green success, red failed, orange aborted, blue open, yellow possibly stalled, grey stale. [Health](/d/ett-health/timeline-health)"
+    "content": "**Recorded runs from Tiled.** Click a run to select it. Green success \u00b7 red failed \u00b7 orange aborted \u00b7 blue open \u00b7 yellow possibly stalled \u00b7 light blue activity unknown \u00b7 grey stale. [Health](/d/ett-health/timeline-health)"
    }
   },
   {
    "type": "table",
    "title": "Queue",
    "gridPos": {
-    "x": 8,
+    "x": 6,
     "y": 0,
-    "w": 11,
+    "w": 9,
     "h": 4
    },
    "datasource": {
@@ -87,9 +97,9 @@
        "type": "string"
       },
       {
-       "selector": "items_in_queue",
-       "text": "items_in_queue",
-       "type": "number"
+       "selector": "state",
+       "text": "state",
+       "type": "string"
       },
       {
        "selector": "running_plan",
@@ -97,9 +107,14 @@
        "type": "string"
       },
       {
-       "selector": "state",
-       "text": "state",
-       "type": "string"
+       "selector": "running_since",
+       "text": "running_since",
+       "type": "timestamp_epoch_s"
+      },
+      {
+       "selector": "items_in_queue",
+       "text": "items_in_queue",
+       "type": "number"
       }
      ]
     }
@@ -121,7 +136,7 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 120
+        "value": 115
        }
       ]
      },
@@ -133,7 +148,67 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 110
+        "value": 90
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "running_since"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 150
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "state"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 120
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "items_in_queue"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "running_plan"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "running_since"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
        }
       ]
      },
@@ -185,12 +260,12 @@
    }
   },
   {
-   "type": "stat",
-   "title": "Data age",
+   "type": "table",
+   "title": "Data status",
    "gridPos": {
-    "x": 19,
+    "x": 15,
     "y": 0,
-    "w": 5,
+    "w": 9,
     "h": 4
    },
    "datasource": {
@@ -208,56 +283,100 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/health",
+     "url": "http://adapter:8000/clips/status?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}",
      "url_options": {
       "method": "GET",
       "data": ""
      },
-     "root_selector": "",
+     "root_selector": "issues",
      "columns": [
       {
-       "selector": "data_age_s",
-       "text": "data_age_s",
-       "type": "number"
+       "selector": "state",
+       "text": "state",
+       "type": "string"
+      },
+      {
+       "selector": "message",
+       "text": "message",
+       "type": "string"
       }
      ]
     }
    ],
    "options": {
-    "reduceOptions": {
-     "calcs": [
-      "max"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "none",
-    "textMode": "value"
+    "showHeader": false,
+    "cellHeight": "sm"
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "s",
-     "noValue": "no fetch yet",
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
+     "noValue": "no status: adapter not answering"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "state"
+      },
+      "properties": [
        {
-        "color": "green",
-        "value": null
+        "id": "custom.width",
+        "value": 90
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "message"
+      },
+      "properties": [
+       {
+        "id": "custom.wrapText",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "state"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-background"
+        }
        },
        {
-        "color": "orange",
-        "value": 120
-       },
-       {
-        "color": "red",
-        "value": 600
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "complete": {
+            "color": "green",
+            "index": 0
+           },
+           "partial": {
+            "color": "orange",
+            "index": 1
+           },
+           "stale": {
+            "color": "red",
+            "index": 2
+           },
+           "incomplete": {
+            "color": "red",
+            "index": 3
+           }
+          }
+         }
+        ]
        }
       ]
      }
-    },
-    "overrides": []
+    ]
    }
   },
   {
@@ -397,9 +516,13 @@
             "color": "yellow",
             "index": 5
            },
+           "activity unknown": {
+            "color": "light-blue",
+            "index": 6
+           },
            "stale": {
             "color": "gray",
-            "index": 6
+            "index": 7
            }
           }
          }
@@ -534,7 +657,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/runs/${run:percentencode}",
+     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -559,7 +682,20 @@
    },
    "fieldConfig": {
     "defaults": {},
-    "overrides": []
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "key"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 140
+       }
+      ]
+     }
+    ]
    }
   },
   {
@@ -586,7 +722,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/runs/${run:percentencode}/streams",
+     "url": "http://adapter:8000/selection/streams?uid=${run:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -615,7 +751,9 @@
     "showHeader": true
    },
    "fieldConfig": {
-    "defaults": {},
+    "defaults": {
+     "noValue": "no run selected, or no streams"
+    },
     "overrides": [
      {
       "matcher": {
@@ -640,18 +778,47 @@
         "value": 160
        }
       ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "last_event"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "stream"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "Show fields (below the timeline)",
+          "url": "/d/ett-timeline/timeline?${run:queryparam}&var-stream=${__data.fields[\"stream\"]}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
      }
     ]
    }
   },
   {
-   "type": "table",
-   "title": "Run data (default view)",
+   "type": "stat",
+   "title": "",
    "gridPos": {
     "x": 12,
     "y": 4,
     "w": 12,
-    "h": 7
+    "h": 2
    },
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
@@ -668,7 +835,70 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/runs/${run:percentencode}/data",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "",
+     "columns": [
+      {
+       "selector": "notice",
+       "text": "notice",
+       "type": "string"
+      }
+     ]
+    }
+   ],
+   "transparent": true,
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "/^notice$/",
+     "values": false
+    },
+    "colorMode": "none",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "auto",
+    "text": {
+     "valueSize": 14
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "no run selected"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "table",
+   "title": "Run data (default view)",
+   "gridPos": {
+    "x": 12,
+    "y": 6,
+    "w": 12,
+    "h": 6
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "table",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -681,7 +911,9 @@
     "showHeader": true
    },
    "fieldConfig": {
-    "defaults": {},
+    "defaults": {
+     "noValue": "no rows"
+    },
     "overrides": [
      {
       "matcher": {
@@ -703,7 +935,79 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 80
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "units"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 60
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "time"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 170
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "stream"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 150
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "units"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "value"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "time"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
        }
       ]
      }
@@ -715,9 +1019,9 @@
    "title": "Run time series",
    "gridPos": {
     "x": 12,
-    "y": 11,
+    "y": 12,
     "w": 12,
-    "h": 7
+    "h": 6
    },
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
@@ -734,7 +1038,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/runs/${run:percentencode}/data?kind=timeseries&max_points=2000",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&kind=timeseries&max_points=2000",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -858,6 +1162,16 @@
        "type": "number"
       },
       {
+       "selector": "zoom_from_ms",
+       "text": "zoom_from_ms",
+       "type": "number"
+      },
+      {
+       "selector": "zoom_to_ms",
+       "text": "zoom_to_ms",
+       "type": "number"
+      },
+      {
        "selector": "possibly_stalled",
        "text": "possibly_stalled",
        "type": "boolean"
@@ -866,6 +1180,11 @@
        "selector": "stale",
        "text": "stale",
        "type": "boolean"
+      },
+      {
+       "selector": "activity_error",
+       "text": "activity_error",
+       "type": "string"
       }
      ]
     }
@@ -935,9 +1254,13 @@
          "color": "yellow",
          "index": 5
         },
+        "activity unknown": {
+         "color": "light-blue",
+         "index": 6
+        },
         "stale": {
          "color": "gray",
-         "index": 6
+         "index": 7
         }
        }
       }
@@ -949,7 +1272,7 @@
       },
       {
        "title": "Zoom to run",
-       "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&from=${__data.fields[\"clip_from_ms\"]}&to=${__data.fields[\"clip_to_ms\"]}"
+       "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&from=${__data.fields[\"zoom_from_ms\"]}&to=${__data.fields[\"zoom_to_ms\"]}"
       }
      ]
     },
@@ -1021,6 +1344,38 @@
      {
       "matcher": {
        "id": "byName",
+       "options": "zoom_from_ms"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "zoom_to_ms"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
        "options": "possibly_stalled"
       },
       "properties": [
@@ -1038,6 +1393,22 @@
       "matcher": {
        "id": "byName",
        "options": "stale"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "activity_error"
       },
       "properties": [
        {
@@ -1080,6 +1451,93 @@
      }
     ]
    }
+  },
+  {
+   "type": "row",
+   "title": "Stream fields (choose a stream in Streams)",
+   "collapsed": true,
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [
+    {
+     "type": "table",
+     "title": "Fields of ${stream}",
+     "gridPos": {
+      "x": 0,
+      "y": 31,
+      "w": 24,
+      "h": 8
+     },
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "targets": [
+      {
+       "refId": "A",
+       "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "timeline-adapter"
+       },
+       "type": "json",
+       "source": "url",
+       "parser": "backend",
+       "format": "table",
+       "url": "http://adapter:8000/selection/fields?uid=${run:percentencode}&stream=${stream:percentencode}",
+       "url_options": {
+        "method": "GET",
+        "data": ""
+       },
+       "root_selector": "",
+       "columns": [
+        {
+         "selector": "field",
+         "text": "field",
+         "type": "string"
+        },
+        {
+         "selector": "dtype",
+         "text": "dtype",
+         "type": "string"
+        },
+        {
+         "selector": "shape",
+         "text": "shape",
+         "type": "string"
+        },
+        {
+         "selector": "units",
+         "text": "units",
+         "type": "string"
+        },
+        {
+         "selector": "hinted",
+         "text": "hinted",
+         "type": "boolean"
+        },
+        {
+         "selector": "external",
+         "text": "external",
+         "type": "boolean"
+        }
+       ]
+      }
+     ],
+     "options": {
+      "showHeader": true
+     },
+     "fieldConfig": {
+      "defaults": {
+       "noValue": "choose a stream in Streams"
+      },
+      "overrides": []
+     }
+    }
+   ]
   }
  ]
 }

@@ -122,16 +122,22 @@ class Layout:
     ) -> tuple[list[RunRecord], bool]:
         """Runs overlapping ``[t_from, t_to)`` under one root (plan §5.4).
 
-        The de-duplicated union of two searches: closed runs with
-        ``start.time < to`` and ``stop.time >= from``; open runs (no ``stop``
-        key) with ``to - horizon <= start.time < to``. Returns
-        ``(runs, truncated)``.
+        The de-duplicated union of two searches: open runs (no ``stop`` key)
+        with ``to - horizon <= start.time < to``; closed runs with
+        ``start.time < to`` and ``stop.time >= from``. Returns
+        ``(runs, truncated)``, sorted by start time.
+
+        The open search goes first: a run that closes between the two searches
+        is then found closed by the second instead of by neither. A key found
+        by both is kept as the closed record. The two searches are not one
+        snapshot of the catalogue; anything else that changes between them is
+        seen at the next refresh.
+
+        At most ``max_runs`` runs are returned. Above that, open runs are kept
+        first (an operator needs what is still going on), then closed runs in
+        Tiled's order (insertion order: the earliest written), and
+        ``truncated`` is true.
         """
-        closed, truncated_closed = self.reader.search(
-            root,
-            [_compare("lt", "start.time", t_to), _compare("ge", "stop.time", t_from)],
-            max_items=max_runs,
-        )
         opened, truncated_open = self.reader.search(
             root,
             [
@@ -141,14 +147,17 @@ class Layout:
             ],
             max_items=max_runs,
         )
-        runs: dict[str, RunRecord] = {}
-        for item in [*closed, *opened]:
-            record = _record(root, item)
-            if record is not None:
-                runs.setdefault(record.key, record)
-        result = sorted(runs.values(), key=lambda r: (r.start_time or 0.0, r.key))
-        truncated = truncated_closed or truncated_open or len(result) > max_runs
-        return result[:max_runs], truncated
+        closed, truncated_closed = self.reader.search(
+            root,
+            [_compare("lt", "start.time", t_to), _compare("ge", "stop.time", t_from)],
+            max_items=max_runs,
+        )
+        open_runs = [r for r in (_record(root, item) for item in opened) if r is not None]
+        closed_runs = {r.key: r for r in (_record(root, item) for item in closed) if r is not None}
+        runs = [r for r in open_runs if r.key not in closed_runs]
+        runs += list(closed_runs.values())
+        truncated = truncated_open or truncated_closed or len(runs) > max_runs
+        return sorted(runs[:max_runs], key=lambda r: (r.start_time or 0.0, r.key)), truncated
 
     def find_run(self, roots: Sequence[str], key: str) -> RunRecord | None:
         """The run stored under ``key`` in the first root that has it."""
@@ -208,18 +217,16 @@ class Layout:
 
     def last_event_time(self, run: RunRecord) -> float | None:
         """Latest event time over all streams with scalar data. Reads each
-        stream's whole ``time`` column, so use it for open runs only (plan §5.2)."""
+        stream's whole ``time`` column (only that column, unsorted), so use it
+        for open runs only (plan §5.2)."""
         latest: float | None = None
         for stream in self.streams(run):
             if not stream.has_table:
                 continue
-            times = [
-                t
-                for t in (_finite(v) for v in self.event_columns(run, stream.name)["time"])
-                if t is not None
-            ]
-            if times and (latest is None or max(times) > latest):
-                latest = max(times)
+            column = self.reader.table_columns(f"{run.path}/{stream.name}/{TABLE}", ["time"])
+            for t in (_finite(v) for v in column["time"]):
+                if t is not None and (latest is None or t > latest):
+                    latest = t
         return latest
 
 

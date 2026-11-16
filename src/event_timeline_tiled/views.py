@@ -27,7 +27,7 @@ class ViewKind(StrEnum):
     TABLE = "table"
     """Long-format rows: stream, seq_num, time, field, value, units."""
     TIMESERIES = "timeseries"
-    """Wide rows from one stream: time (ms) and one column per field."""
+    """Long rows from one stream: time (ms), field, value."""
     SUMMARY = "summary"
     """The run's start and stop metadata as key/value rows."""
 
@@ -123,8 +123,12 @@ class ResolvedView:
     streams: tuple[str, ...]
     fields: tuple[str, ...]
     units: Mapping[str, str]
+    """Units by field name; for a field in several streams, the first stream's."""
     available: bool
     reason: str
+    columns: tuple[tuple[str, str, str | None], ...] = ()
+    """``(stream, field, units)`` per stream, in display order: what a table
+    view reads. ``fields`` and ``units`` are their de-duplicated summary."""
 
 
 def entry_for(instrument: Any) -> InstrumentEntry | None:
@@ -174,11 +178,20 @@ def _units(stream: StreamInfo | None, fields: Sequence[str]) -> dict[str, str]:
 
 def _table_view(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedView:
     present = tuple(s for s in spec.streams if s in streams and streams[s].has_table)
-    fields = tuple(f for s in present for f in _scalar_fields(streams[s], numeric_only=False))
-    units = {k: v for s in present for k, v in _units(streams[s], list(fields)).items()}
+    columns = tuple(
+        (s, f, _units(streams[s], [f]).get(f))
+        for s in present
+        for f in _scalar_fields(streams[s], numeric_only=False)
+    )
+    fields = tuple(dict.fromkeys(f for _, f, _ in columns))
+    units: dict[str, str] = {}
+    for _, f, u in columns:
+        if u is not None:
+            units.setdefault(f, u)
     return ResolvedView(
         spec.name, spec.title, spec.kind, present, fields, units,
         available=bool(present), reason="" if present else "none of its streams has events",
+        columns=columns,
     )  # fmt: skip
 
 

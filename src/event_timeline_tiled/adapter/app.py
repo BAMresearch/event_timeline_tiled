@@ -1,9 +1,10 @@
 """FastAPI application: the adapter's endpoints (plan §6.1).
 
 Times are epoch seconds, except the Grafana time fields of ``/clips/frame``
-(milliseconds). Every endpoint validates its inputs and states truncation.
-Responses never contain the Tiled credential or raw upstream bodies. The
-endpoint contract is documented in ``docs/technical/endpoints.md``.
+and of data rows (milliseconds). Every endpoint validates its inputs and
+states truncation. Responses never contain the Tiled credential or raw
+upstream bodies. The endpoint contract is documented in
+``docs/technical/endpoints.md``.
 """
 
 from __future__ import annotations
@@ -11,7 +12,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -22,16 +25,30 @@ from .. import __version__
 from ..clips import frame, lane_key, lane_names
 from ..layout import Layout, RunRecord
 from ..queues import ApiFactory, QueueMonitor
-from ..run_state import Status, activity, role_of, status_of
+from ..run_state import Status, role_of, status_of
 from ..settings import Settings
 from ..tiled_http import HealthStatus, SourceError, TiledReader
-from ..timeline import Timeline
-from ..views import TABLE_ROW_LIMIT, ResolvedView, ViewKind, label, resolve, stall_after_s
+from ..timeline import SourceFetch, Timeline, WindowResult
+from ..views import TABLE_ROW_LIMIT, ResolvedView, ViewKind, label, resolve
 
 MAX_WINDOW_S = 400 * 86400
 """Longest window accepted (a little over a year)."""
-UID = Annotated[str, Path(pattern=r"^[A-Za-z0-9_~.-]{1,200}$")]
-SECONDS = Annotated[float, Query(description="epoch seconds")]
+UID_PATTERN = r"[A-Za-z0-9_~.-]{1,200}"
+UID = Annotated[str, Path(pattern=f"^{UID_PATTERN}$")]
+SELECTED = Annotated[str, Query(pattern=f"^({UID_PATTERN})?$")]
+"""A dashboard selection: a run key or stream name, or empty for none."""
+VIEW = Annotated[str | None, Query(pattern=r"^[a-z][a-z0-9_]*$")]
+MAX_POINTS = Annotated[int, Query(ge=10, le=20_000)]
+
+METADATA_MAX_ROWS = 2000
+"""Metadata rows per run at most (start and stop together)."""
+METADATA_MAX_DEPTH = 8
+"""Nesting flattened into dotted keys; deeper values are shown as JSON text."""
+METADATA_MAX_CHARS = 2000
+"""Characters per metadata value at most; longer values end in "…"."""
+DATA_CACHE_S = 5.0
+"""A view's rows are reused for this long (several panels read the same view)."""
+NO_SELECTION = "Select a run on the timeline or in Runs in range"
 
 
 def _window(t_from: float, t_to: float) -> None:
@@ -62,25 +79,128 @@ def _ms(seconds: Any) -> int | None:
     return round(seconds * 1000) if math.isfinite(seconds) else None
 
 
-def _flatten(prefix: str, value: Any, out: list[tuple[str, Any]]) -> None:
+# Metadata ------------------------------------------------------------------------------
+
+
+def _plain(value: Any, depth: int = 0) -> Any:
+    """``value`` as plain JSON data: non-finite numbers become ``None``,
+    unknown types their ``str``, nesting beyond the limit ``"…"``."""
+    if depth > METADATA_MAX_DEPTH:
+        return "…"
     if isinstance(value, Mapping):
-        for key in sorted(value, key=str):
-            _flatten(f"{prefix}.{key}" if prefix else str(key), value[key], out)
-    elif isinstance(value, list | tuple) and any(isinstance(v, Mapping) for v in value):
-        out.append((prefix, json.dumps(value, default=str)))
-    elif isinstance(value, list | tuple):
-        out.append((prefix, ", ".join(str(v) for v in value)))
-    else:
-        out.append((prefix, _json_value(value)))
+        return {str(k): _plain(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_plain(v, depth + 1) for v in value]
+    if value is None or isinstance(value, str | bool | int):
+        return value
+    if isinstance(value, float):
+        return _json_value(value)
+    return str(value)
 
 
-def metadata_rows(run: RunRecord) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def _scalar(value: Any) -> bool:
+    return value is None or isinstance(value, str | bool | int | float)
+
+
+class _Rows:
+    """Flattened metadata rows within the row and value-length limits."""
+
+    def __init__(self) -> None:
+        self.rows: list[dict[str, Any]] = []
+        self.truncated = False
+
+    def add(self, document: str, key: str, value: Any) -> bool:
+        if len(self.rows) >= METADATA_MAX_ROWS:
+            self.truncated = True
+            return False
+        if isinstance(value, str) and len(value) > METADATA_MAX_CHARS:
+            value, self.truncated = value[: METADATA_MAX_CHARS - 1] + "…", True
+        self.rows.append({"document": document, "key": key, "value": value})
+        return True
+
+    def flatten(self, document: str, prefix: str, value: Any, depth: int = 0) -> bool:
+        """Mappings become dotted keys; lists of scalars are joined with ``, ``
+        (strings as they are, other values as JSON); other lists and nesting
+        beyond the limit are JSON text. Returns ``False`` once full."""
+        if isinstance(value, Mapping) and depth < METADATA_MAX_DEPTH:
+            for key in sorted(value, key=str):
+                name = f"{prefix}.{key}" if prefix else str(key)
+                if not self.flatten(document, name, value[key], depth + 1):
+                    return False
+            return True
+        if isinstance(value, Mapping) or (
+            isinstance(value, list | tuple) and not all(_scalar(v) for v in value)
+        ):
+            text = json.dumps(_plain(value, depth), allow_nan=False, default=str)
+            return self.add(document, prefix, text)
+        if isinstance(value, list | tuple):
+            parts = [v if isinstance(v, str) else json.dumps(_plain(v)) for v in value]
+            return self.add(document, prefix, ", ".join(parts))
+        return self.add(document, prefix, _plain(value))
+
+
+def metadata_rows(run: RunRecord) -> tuple[list[dict[str, Any]], bool]:
+    """The start and stop documents as ``(rows, truncated)``."""
+    rows = _Rows()
     for document, content in (("start", run.start), ("stop", run.stop or {})):
-        flat: list[tuple[str, Any]] = []
-        _flatten("", content, flat)
-        rows += [{"document": document, "key": k, "value": v} for k, v in flat]
-    return rows
+        if not rows.flatten(document, "", content):
+            break
+    return rows.rows, rows.truncated
+
+
+# Completeness --------------------------------------------------------------------------
+
+_SEVERITY = {"complete": 0, "partial": 1, "stale": 2, "incomplete": 3}
+
+
+def _age(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.0f} s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+def _issues(result: WindowResult, settings: Settings, now: float) -> list[tuple[str, str, str]]:
+    """``(state, root, message)`` per problem with this window's data."""
+    out: list[tuple[str, str, str]] = []
+    for f in result.fetches:
+        root = f.root or "/"
+        if not f.ok and f.last_success is None:
+            out.append(("incomplete", root, f"{root}: {f.error}, no data from this root yet"))
+        elif not f.ok and f.last_success is not None:
+            age = _age(now - f.last_success)
+            out.append(("stale", root, f"{root}: {f.error}; runs as last seen, {age} ago"))
+        if f.truncated:
+            out.append(
+                ("incomplete", root,
+                 f"{root}: more than {settings.max_runs} runs; open runs first, "
+                 "then the earliest written; narrow the time range")
+            )  # fmt: skip
+        if f.activity_errors:
+            out.append(
+                ("partial", root,
+                 f"{root}: activity of {f.activity_errors} open run(s) unknown "
+                 f"({f.activity_error})")
+            )  # fmt: skip
+    if result.unplaceable:
+        n = len(result.unplaceable)
+        out.append(("partial", "", f"{n} run(s) without a usable start time not drawn"))
+    return out
+
+
+def _fetch_row(f: SourceFetch, now: float) -> dict[str, Any]:
+    return {
+        "root": f.root or "/",
+        "ok": f.ok,
+        "error": f.error,
+        "last_success": f.last_success,
+        "data_age_s": None if f.last_success is None else round(now - f.last_success, 1),
+        "truncated": f.truncated,
+        "runs": f.runs,
+        "activity_errors": f.activity_errors,
+        "activity_error": f.activity_error,
+    }
 
 
 def create_app(
@@ -88,6 +208,7 @@ def create_app(
     reader: TiledReader | None = None,
     clock: Callable[[], float] = time.time,
     queue_api: ApiFactory | None = None,
+    data_cache_s: float = DATA_CACHE_S,
 ) -> FastAPI:
     tiled = reader or TiledReader(settings)
     layout = Layout(tiled)
@@ -97,6 +218,8 @@ def create_app(
         if queue_api
         else QueueMonitor(settings.queues, clock=clock)
     )
+    data_cache: OrderedDict[tuple[str, str, str, int], tuple[float, dict[str, Any]]] = OrderedDict()
+    data_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -167,7 +290,8 @@ def create_app(
         if wanted is not None and not wanted <= {s.value for s in Status}:
             raise HTTPException(422, f"status must be among {', '.join(s.value for s in Status)}")
         result = timeline.window(t_from, t_to)
-        names = lane_names(sorted({c.lane_key for c in result.clips}, key=lambda k: k.as_text()))
+        now = clock()
+        names = lane_names([c.lane_key for c in result.clips])
         return {
             "from": t_from,
             "to": t_to,
@@ -178,43 +302,65 @@ def create_app(
             ],
             "truncated": result.truncated,
             "unplaceable": result.unplaceable,
-            "sources": [
-                {
-                    "root": s.root or "/",
-                    "ok": s.error is None,
-                    "error": s.error.value if s.error else None,
-                    "last_success": s.last_success,
-                }
-                for s in result.sources
-            ],
+            "sources": [_fetch_row(f, now) for f in result.fetches],
         }
 
     @app.get("/clips/frame")
     def clips_frame(
         t_from: Annotated[float, Query(alias="from")], t_to: Annotated[float, Query(alias="to")]
     ) -> list[dict[str, Any]]:
-        """The timeline frame of plan §8 (milliseconds), lanes final."""
+        """The timeline frame of plan §8 (milliseconds), lanes final. Whether it
+        is complete is ``/clips/status``."""
+        _window(t_from, t_to)
+        return frame(timeline.window(t_from, t_to).clips, t_from, t_to)
+
+    @app.get("/clips/status")
+    def clips_status(
+        t_from: Annotated[float, Query(alias="from")], t_to: Annotated[float, Query(alias="to")]
+    ) -> dict[str, Any]:
+        """Is the window's data complete? ``issues`` lists every reason it is
+        not (one ``complete`` row if it is), worst first."""
         _window(t_from, t_to)
         result = timeline.window(t_from, t_to)
-        return frame(result.clips, t_from, t_to, result.open_until)
+        now = clock()
+        issues = sorted(_issues(result, settings, now), key=lambda i: -_SEVERITY[i[0]])
+        state = issues[0][0] if issues else "complete"
+        if not issues:
+            roots = len(result.fetches)
+            issues = [
+                ("complete", "",
+                 f"{len(result.clips)} runs from {roots} root(s), read now; open runs "
+                 f"from up to {settings.open_run_horizon_days:g} days before the range end")
+            ]  # fmt: skip
+        return {
+            "from": t_from,
+            "to": t_to,
+            "state": state,
+            "complete": state == "complete",
+            "runs": len(result.clips),
+            "truncated": result.truncated,
+            "unplaceable": result.unplaceable,
+            "open_run_horizon_days": settings.open_run_horizon_days,
+            "max_runs": settings.max_runs,
+            "sources": [_fetch_row(f, now) for f in result.fetches],
+            "issues": [{"state": s, "root": r, "message": m} for s, r, m in issues],
+        }
 
-    @app.get("/runs/{uid}")
-    def run_summary(uid: UID) -> dict[str, Any]:
-        run = find(uid)
-        status = status_of(run.stop)
-        last = timeline.last_event(run, clock()) if status is Status.OPEN else None
-        act = activity(status, run.start_time, last, clock(), stall_after_s(run))
+    # One run -----------------------------------------------------------------------------
+
+    def summary_of(run: RunRecord) -> dict[str, Any]:
+        act = timeline.activity_of(run, clock())
         key = lane_key(run)
         start, stop = run.start_time, run.stop_time
         reason = (run.stop or {}).get("reason")
-        summary = {
+        return {
             "uid": run.key,
             "start_uid": run.start_uid,
             "uid_mismatch": run.uid_mismatch,
             "root": run.root or "/",
             "lane": lane_names([key])[key],
             "role": role_of(run.start).value,
-            "status": status.value,
+            "status": status_of(run.stop).value,
             "reason": reason if isinstance(reason, str) else None,
             "label": label(run),
             "plan_name": run.start.get("plan_name"),
@@ -224,25 +370,32 @@ def create_app(
             "last_event": act.last_event,
             "last_event_age_s": act.age_s,
             "possibly_stalled": act.possibly_stalled,
-        }
-        return {
-            "run": summary,
-            "summary": [{"key": k, "value": _json_value(v)} for k, v in summary.items()],
-            "metadata": metadata_rows(run),
+            "activity_error": act.error,
         }
 
-    @app.get("/runs/{uid}/streams")
-    def run_streams(uid: UID) -> list[dict[str, Any]]:
-        """Streams with event counts (from the stop document when closed) and the
-        first and last event time (from the ``time`` column)."""
+    def summary_rows(summary: Mapping[str, Any]) -> list[dict[str, Any]]:
+        return [{"key": k, "value": _json_value(v)} for k, v in summary.items()]
+
+    @app.get("/runs/{uid}")
+    def run_summary(uid: UID) -> dict[str, Any]:
         run = find(uid)
+        summary = summary_of(run)
+        metadata, truncated = metadata_rows(run)
+        return {
+            "run": summary,
+            "summary": summary_rows(summary),
+            "metadata": metadata,
+            "metadata_truncated": truncated,
+        }
+
+    def streams_of(run: RunRecord) -> list[dict[str, Any]]:
         rows = []
         try:
             for stream in layout.streams(run):
                 times: list[float] = []
                 if stream.has_table:
                     raw = layout.event_columns(run, stream.name)["time"]
-                    times = [t for t in raw if isinstance(t, int | float)]
+                    times = [t for t in raw if isinstance(t, int | float) and math.isfinite(t)]
                 count = run.num_events(stream.name)
                 rows.append(
                     {
@@ -258,9 +411,13 @@ def create_app(
             raise _upstream(exc) from None
         return rows
 
-    @app.get("/runs/{uid}/streams/{stream}/fields")
-    def stream_fields(uid: UID, stream: UID) -> list[dict[str, Any]]:
-        run = find(uid)
+    @app.get("/runs/{uid}/streams")
+    def run_streams(uid: UID) -> list[dict[str, Any]]:
+        """Streams with event counts (from the stop document when closed) and the
+        first and last event time (from the ``time`` column)."""
+        return streams_of(find(uid))
+
+    def fields_of(run: RunRecord, stream: str) -> list[dict[str, Any]]:
         try:
             streams = {s.name: s for s in layout.streams(run)}
         except SourceError as exc:
@@ -273,13 +430,17 @@ def create_app(
                 "field": name,
                 "dtype": key.get("dtype"),
                 "dtype_numpy": key.get("dtype_numpy"),
-                "shape": json.dumps(key.get("shape")),
+                "shape": json.dumps(_plain(key.get("shape"))),
                 "units": key.get("units"),
                 "hinted": name in info.hints,
                 "external": bool(key.get("external")),
             }
             for name, key in sorted(info.data_keys.items())
         ]
+
+    @app.get("/runs/{uid}/streams/{stream}/fields")
+    def stream_fields(uid: UID, stream: UID) -> list[dict[str, Any]]:
+        return fields_of(find(uid), stream)
 
     def views_of(run: RunRecord) -> list[ResolvedView]:
         try:
@@ -302,6 +463,7 @@ def create_app(
                     "streams": list(v.streams),
                     "fields": list(v.fields),
                     "units": dict(v.units),
+                    "columns": [{"stream": s, "field": f, "units": u} for s, f, u in v.columns],
                     "available": v.available,
                     "reason": v.reason,
                     "default": v.name == default,
@@ -310,51 +472,78 @@ def create_app(
             ],
         }
 
-    @app.get("/runs/{uid}/data")
-    def run_data(
-        uid: UID,
-        view: Annotated[str | None, Query(pattern=r"^[a-z][a-z0-9_]*$")] = None,
-        kind: ViewKind | None = None,
-        max_points: Annotated[int, Query(ge=10, le=20_000)] = 2000,
+    def data_of(
+        run: RunRecord, view: str | None, kind: ViewKind | None, max_points: int
     ) -> dict[str, Any]:
-        """Rows for one view: ``view`` by name, else the first available view of
-        ``kind``, else the default view."""
-        if view and kind:
-            raise HTTPException(422, "give view or kind, not both")
-        run = find(uid)
         views = views_of(run)
         if kind is not None:
             chosen = next((v for v in views if v.available and v.kind is kind), None)
             if chosen is None:
+                reason = f"this run has no {kind.value} view"
                 return {"view": None, "kind": kind.value, "rows": [], "truncated": False,
-                        "reason": f"this run has no {kind.value} view"}  # fmt: skip
+                        "reason": reason, "notice": reason}  # fmt: skip
         else:
             chosen = next((v for v in views if (v.name == view if view else v.available)), None)
         if chosen is None:
             raise HTTPException(404, "no such view for this run")
         if not chosen.available:
             return {"view": chosen.name, "kind": chosen.kind.value, "rows": [],
-                    "truncated": False, "reason": chosen.reason}  # fmt: skip
+                    "truncated": False, "reason": chosen.reason,
+                    "notice": f"{chosen.title}: {chosen.reason}"}  # fmt: skip
+        key = (run.root, run.key, chosen.name, max_points)
+        now = time.monotonic()
+        with data_lock:
+            cached = data_cache.get(key)
+        if cached is not None and now - cached[0] < data_cache_s:
+            return cached[1]
         try:
             if chosen.kind is ViewKind.SUMMARY:
-                rows = metadata_rows(run)
-                return {"view": chosen.name, "kind": chosen.kind.value, "rows": rows,
-                        "truncated": False}  # fmt: skip
-            if chosen.kind is ViewKind.TABLE:
-                return _table(run, chosen)
-            return _timeseries(run, chosen, max_points)
+                rows, truncated = metadata_rows(run)
+                notice = chosen.title + ("; long or deep values cut" if truncated else "")
+                body = {"view": chosen.name, "kind": chosen.kind.value, "rows": rows,
+                        "truncated": truncated, "notice": notice}  # fmt: skip
+            elif chosen.kind is ViewKind.TABLE:
+                body = _table(run, chosen)
+            else:
+                body = _timeseries(run, chosen, max_points)
         except SourceError as exc:
             raise _upstream(exc) from None
+        with data_lock:
+            data_cache[key] = (now, body)
+            data_cache.move_to_end(key)
+            while len(data_cache) > 32:
+                data_cache.popitem(last=False)
+        return body
+
+    @app.get("/runs/{uid}/data")
+    def run_data(
+        uid: UID, view: VIEW = None, kind: ViewKind | None = None, max_points: MAX_POINTS = 2000
+    ) -> dict[str, Any]:
+        """Rows for one view: ``view`` by name, else the first available view of
+        ``kind``, else the default view."""
+        if view and kind:
+            raise HTTPException(422, "give view or kind, not both")
+        return data_of(find(uid), view, kind, max_points)
 
     def _table(run: RunRecord, view: ResolvedView) -> dict[str, Any]:
+        """Long rows, stream by stream in view order, each stream with its own
+        fields and units. Reading stops once a row beyond the limit exists."""
         rows: list[dict[str, Any]] = []
         truncated = False
-        streams = {s.name: s for s in layout.streams(run)}
         for name in view.streams:
-            fields = [f for f in view.fields if f in streams[name].data_keys]
-            columns = layout.event_columns(run, name, fields)
-            for i, seq in enumerate(columns["seq_num"]):
-                for f in fields:
+            columns = [(f, u) for s, f, u in view.columns if s == name]
+            if not columns:
+                continue
+            if len(rows) >= TABLE_ROW_LIMIT:
+                events = run.num_events(name)
+                if events == 0:
+                    continue
+                if events is not None:
+                    truncated = True
+                    break
+            data = layout.event_columns(run, name, [f for f, _ in columns])
+            for i, seq in enumerate(data["seq_num"]):
+                for f, units in columns:
                     if len(rows) >= TABLE_ROW_LIMIT:
                         truncated = True
                         break
@@ -362,23 +551,40 @@ def create_app(
                         {
                             "stream": name,
                             "seq_num": seq,
-                            "time": _ms(columns["time"][i]),
+                            "time": _ms(data["time"][i]),
                             "field": f,
-                            "value": _json_value(columns[f][i]),
-                            "units": view.units.get(f),
+                            "value": _json_value(data[f][i]),
+                            "units": units,
                         }
                     )
+                if truncated:
+                    break
+            if truncated:
+                break
+        notice = f"{view.title}: {len(rows)} rows"
+        if truncated:
+            notice = f"{view.title}: only the first {TABLE_ROW_LIMIT} rows are shown"
         return {"view": view.name, "kind": view.kind.value, "rows": rows,
-                "truncated": truncated, "row_limit": TABLE_ROW_LIMIT}  # fmt: skip
+                "truncated": truncated, "row_limit": TABLE_ROW_LIMIT,
+                "notice": notice}  # fmt: skip
 
     def _timeseries(run: RunRecord, view: ResolvedView, max_points: int) -> dict[str, Any]:
+        """Long rows (time, field, value) from one stream: at most ``max_points``
+        rows over all fields. Events are decimated to ``max_points // fields``:
+        every k-th from the first, and always the last."""
         [stream] = view.streams
-        columns = layout.event_columns(run, stream, view.fields)
+        fields = list(view.fields[:max_points])
+        columns = layout.event_columns(run, stream, fields)
         n = len(columns["time"])
-        every = max(1, math.ceil(n / max_points))
-        indices = list(range(0, n, every))
-        if n and indices[-1] != n - 1:
-            indices.append(n - 1)
+        budget = max_points // len(fields) if fields else 0
+        indices: list[int]
+        if n <= budget:
+            every, indices = 1, list(range(n))
+        elif budget <= 1:
+            every, indices = n, [n - 1]
+        else:
+            every = math.ceil((n - 1) / (budget - 1))
+            indices = [*range(0, n - 1, every), n - 1]
         non_finite = 0
         rows = []
         for i in indices:
@@ -388,29 +594,69 @@ def create_app(
                 continue
             # Long format: Infinity's "timeseries" format turns it into one
             # series per field, with a real time field (no dashboard transformation).
-            for f in view.fields:
+            for f in fields:
                 value = _json_value(columns[f][i])
                 non_finite += value is None
                 rows.append({"time": round(t * 1000), "field": f, "value": value})
         # Infinity converts long to wide only for ascending times; event times
         # usually follow seq_num, but nothing guarantees it.
         rows.sort(key=lambda r: r["time"])
+        fields_cut = len(fields) < len(view.fields)
+        notice = f"{view.title} of {stream}: {len(indices)} of {n} events"
+        if fields_cut:
+            notice += f", first {len(fields)} of {len(view.fields)} fields"
         return {
             "view": view.name,
             "kind": view.kind.value,
             "stream": stream,
-            "fields": list(view.fields),
+            "fields": fields,
             "units": dict(view.units),
             "rows": rows,
-            "truncated": False,
+            "truncated": fields_cut,
             "decimation": {
                 "method": "every k-th event, last event always kept",
                 "every": every,
                 "source_rows": n,
+                "events": len(indices),
                 "returned": len(rows),
+                "max_points": max_points,
             },
             "non_finite": non_finite,
+            "notice": notice,
         }
+
+    # The dashboard's selection -----------------------------------------------------------
+    # The same reads as /runs/{uid}/..., with the run (and stream) as query
+    # parameters that may be empty: nothing selected is a normal state of the
+    # dashboard, not an error. An unknown run is still a 404.
+
+    @app.get("/selection/run")
+    def selected_run(uid: SELECTED = "") -> dict[str, Any]:
+        if not uid:
+            return {"selected": False, "summary": [{"key": "run", "value": NO_SELECTION}]}
+        summary = summary_of(find(uid))
+        return {"selected": True, "run": summary, "summary": summary_rows(summary)}
+
+    @app.get("/selection/streams")
+    def selected_streams(uid: SELECTED = "") -> list[dict[str, Any]]:
+        return streams_of(find(uid)) if uid else []
+
+    @app.get("/selection/fields")
+    def selected_fields(uid: SELECTED = "", stream: SELECTED = "") -> list[dict[str, Any]]:
+        return fields_of(find(uid), stream) if uid and stream else []
+
+    @app.get("/selection/data")
+    def selected_data(
+        uid: SELECTED = "",
+        view: VIEW = None,
+        kind: ViewKind | None = None,
+        max_points: MAX_POINTS = 2000,
+    ) -> dict[str, Any]:
+        if view and kind:
+            raise HTTPException(422, "give view or kind, not both")
+        if not uid:
+            return {"view": None, "rows": [], "truncated": False, "notice": NO_SELECTION}
+        return data_of(find(uid), view, kind, max_points)
 
     return app
 

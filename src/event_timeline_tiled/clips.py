@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import quote
 
 from attrs import frozen
 
@@ -21,6 +22,17 @@ MIN_DISPLAY_FRACTION = 0.002
 """Clips shorter than this fraction of the window are widened for display
 only (a 3-second run in 12 hours would be a fraction of a pixel); their true
 extent stays in ``clip_from_ms``/``clip_to_ms``."""
+ZOOM_PAD_FRACTION = 0.05
+ZOOM_PAD_MIN_S = 5.0
+""""Zoom to run" shows the run with this much time on either side (a fraction
+of its duration, at least ``ZOOM_PAD_MIN_S``): never an empty range."""
+
+
+def _component(value: str | None) -> str:
+    """One lane-key component: percent-encoded, ``-`` for a missing one."""
+    if value is None:
+        return "-"
+    return "%2D" if value == "-" else quote(value, safe="")
 
 
 @frozen
@@ -31,8 +43,15 @@ class LaneKey:
     role: Role
 
     def as_text(self) -> str:
+        """``facility/instrument/station/role``, each part percent-encoded and
+        ``-`` for a missing one, so different keys never share a text."""
         return "/".join(
-            [self.facility or "-", self.instrument, self.station or "-", self.role.value]
+            [
+                _component(self.facility),
+                _component(self.instrument),
+                _component(self.station),
+                self.role.value,
+            ]
         )
 
 
@@ -55,21 +74,39 @@ def lane_key(run: RunRecord) -> LaneKey:
 
 
 def lane_names(keys: Sequence[LaneKey]) -> dict[LaneKey, str]:
-    """Display names: instrument, station, "· processing"; the facility is added
-    only where two lanes would otherwise share a name."""
+    """Display names, unique per key: instrument, station, "· processing"; the
+    facility is added only where two lanes would otherwise share a name, and
+    a number in brackets where even that is not enough (in lane order)."""
 
     def short(k: LaneKey) -> str:
         name = k.instrument + (f" {k.station}" if k.station else "")
         return name + (" · processing" if k.role is Role.PROCESSING else "")
 
-    names = {k: short(k) for k in keys}
+    ordered = sorted(set(keys), key=lambda k: (*_lane_order(k), k.as_text()))
+    names = {k: short(k) for k in ordered}
     counts: dict[str, int] = {}
     for name in names.values():
         counts[name] = counts.get(name, 0) + 1
+    taken = _Names()
     return {
-        k: (f"{k.facility or '-'} {name}" if counts[name] > 1 else name)
+        k: taken.claim(f"{k.facility or '-'} {name}" if counts[name] > 1 else name)
         for k, name in names.items()
     }
+
+
+class _Names:
+    """Hands out unique display names: a name already taken gets " (2)", " (3)", …"""
+
+    def __init__(self) -> None:
+        self._taken: set[str] = set()
+
+    def claim(self, name: str) -> str:
+        candidate, n = name, 1
+        while candidate in self._taken:
+            n += 1
+            candidate = f"{name} ({n})"
+        self._taken.add(candidate)
+        return candidate
 
 
 @frozen
@@ -90,6 +127,9 @@ class Clip:
     label: str
     reason: str | None = None
     """The stop document's ``reason`` (failed and aborted runs)."""
+    observed_at: float | None = None
+    """When this run's record was last fetched from Tiled: an open run is
+    drawn up to here and no further."""
 
     def as_row(self, lane: str) -> dict[str, Any]:
         return {
@@ -109,10 +149,14 @@ class Clip:
             "stale": self.stale,
             "label": self.label,
             "reason": self.reason,
+            "observed_at": self.observed_at,
+            "activity_error": self.activity.error,
         }
 
 
-def make_clip(run: RunRecord, activity: Activity, stale: bool, label: str) -> Clip | None:
+def make_clip(
+    run: RunRecord, activity: Activity, stale: bool, label: str, observed_at: float | None = None
+) -> Clip | None:
     """A clip, or ``None`` for a run without a usable start time (reported, not drawn)."""
     if run.start_time is None:
         return None
@@ -130,17 +174,20 @@ def make_clip(run: RunRecord, activity: Activity, stale: bool, label: str) -> Cl
         stale=stale,
         label=label,
         reason=_text((run.stop or {}).get("reason")),
+        observed_at=observed_at,
     )
 
 
 def display_state(clip: Clip) -> str:
-    """The one visible value of a frame row: the status, except that an open
-    run's inferred activity or a stale source is shown instead of "open".
-    The separate ``status``, ``possibly_stalled`` and ``stale`` columns keep
-    the three apart."""
+    """The one visible value of a frame row: the status, except that for an
+    open run a stale source, unknown activity or inferred inactivity is shown
+    instead of "open". The separate ``status``, ``possibly_stalled``,
+    ``stale`` and ``activity_error`` fields keep them apart."""
     if clip.status is Status.OPEN:
         if clip.stale:
             return "stale"
+        if clip.activity.error is not None:
+            return "activity unknown"
         if clip.activity.possibly_stalled:
             return "possibly stalled"
     return clip.status.value
@@ -155,32 +202,44 @@ def _lane_order(key: LaneKey) -> tuple[str, str, str, int]:
     )
 
 
-def frame(
-    clips: Sequence[Clip], t_from: float, t_to: float, open_until: float
-) -> list[dict[str, Any]]:
+def _zoom(start: float, end: float) -> tuple[int, int]:
+    pad = max((end - start) * ZOOM_PAD_FRACTION, ZOOM_PAD_MIN_S)
+    return round((start - pad) * 1000), round((end + pad) * 1000)
+
+
+def frame(clips: Sequence[Clip], t_from: float, t_to: float) -> list[dict[str, Any]]:
     """The timeline frame: one row per clip, in lane order, with ``lane`` final.
 
     - ``start``/``stop``: display extent in **milliseconds** (Grafana time
-      fields; named so they sort in this order). Open runs, and closed runs
-      without a usable stop time, end at ``open_until`` (the last successful
-      fetch); clips shorter than :data:`MIN_DISPLAY_FRACTION` of the window are
-      widened.
+      fields; named so they sort in this order). Open runs end at their
+      ``observed_at`` (the last successful fetch of their source), never
+      before their start; a closed run without a usable stop time is drawn at
+      its start. Clips shorter than :data:`MIN_DISPLAY_FRACTION` of the window
+      are widened.
     - Sub-lanes: per lane, sorted by (display start, uid), each clip takes the
       lowest sub-lane free at its display start; touching clips may share. No
-      clip is dropped.
+      clip is dropped. Every (lane, sub-lane) has its own final name.
     - ``state``: the visible value (see :func:`display_state`).
-    - ``clip_from_ms``/``clip_to_ms``: the true extent, for "Zoom to run".
+    - ``clip_from_ms``/``clip_to_ms``: the true extent (open runs: up to
+      ``observed_at``); ``zoom_from_ms``/``zoom_to_ms``: that extent padded,
+      for "Zoom to run".
     """
-    names = lane_names(sorted({c.lane_key for c in clips}, key=_lane_order))
+    names = lane_names([c.lane_key for c in clips])
     min_width = max(t_to - t_from, 0.0) * MIN_DISPLAY_FRACTION
     rows: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
     ends: dict[LaneKey, list[float]] = {}
+    final = _Names()
+    for name in names.values():
+        final.claim(name)
+    sub_lanes: dict[tuple[LaneKey, int], str] = {}
     extents = []
     for clip in clips:
-        true_end = clip.stop if clip.stop is not None and clip.status is not Status.OPEN else None
-        end = true_end if true_end is not None else max(open_until, clip.start)
-        extents.append((clip, clip.start, max(end, clip.start + min_width), true_end, end))
-    for clip, start, display_end, _true_end, end in sorted(extents, key=lambda e: (e[1], e[0].uid)):
+        if clip.status is Status.OPEN:
+            end = max(clip.observed_at if clip.observed_at is not None else clip.start, clip.start)
+        else:
+            end = clip.stop if clip.stop is not None and clip.stop >= clip.start else clip.start
+        extents.append((clip, clip.start, max(end, clip.start + min_width), end))
+    for clip, start, display_end, end in sorted(extents, key=lambda e: (e[1], e[0].uid)):
         free = ends.setdefault(clip.lane_key, [])
         for index, busy_until in enumerate(free):
             if start >= busy_until:
@@ -189,10 +248,16 @@ def frame(
         else:
             free.append(display_end)
             index = len(free) - 1
-        lane = names[clip.lane_key] + ("" if index == 0 else f" /{index + 1}")
+        if index == 0:
+            lane = names[clip.lane_key]
+        else:
+            lane = sub_lanes.get((clip.lane_key, index)) or sub_lanes.setdefault(
+                (clip.lane_key, index), final.claim(f"{names[clip.lane_key]} /{index + 1}")
+            )
+        zoom_from, zoom_to = _zoom(clip.start, end)
         rows.append(
             (
-                (*_lane_order(clip.lane_key), index, start, clip.uid),
+                (*_lane_order(clip.lane_key), clip.lane_key.as_text(), index, start, clip.uid),
                 {
                     "lane": lane,
                     "start": round(start * 1000),
@@ -205,6 +270,9 @@ def frame(
                     "clip_to_ms": round(end * 1000),
                     "possibly_stalled": clip.activity.possibly_stalled,
                     "stale": clip.stale,
+                    "zoom_from_ms": zoom_from,
+                    "zoom_to_ms": zoom_to,
+                    "activity_error": clip.activity.error,
                 },
             )
         )

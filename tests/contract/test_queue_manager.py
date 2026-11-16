@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from event_timeline_tiled.queues import QueueMonitor
+from event_timeline_tiled.queues import READ_REQUESTS, QueueMonitor
 from event_timeline_tiled.settings import QueueConfig
 
 STARTUP = Path(__file__).parents[2] / "deploy" / "queue" / "startup"
@@ -85,10 +85,24 @@ def manager(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Any, str
         redis.wait(timeout=10)
 
 
-def test_idle_running_and_unreachable(manager: tuple[Any, str]) -> None:
+def test_idle_running_and_unreachable(
+    manager: tuple[Any, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from bluesky_queueserver_api import BPlan
+    from bluesky_queueserver_api.comm_threads import ReManagerComm_ZMQ_Threads
 
     control_api, address = manager
+    # Record every 0MQ request the adapter's monitor sends (the test's own
+    # control API is a different object and is not recorded).
+    sent: list[str] = []
+    send = ReManagerComm_ZMQ_Threads.send_request
+
+    def record(self: Any, *, method: str, params: Any = None) -> Any:
+        if self is not control_api:
+            sent.append(method)
+        return send(self, method=method, params=params)
+
+    monkeypatch.setattr(ReManagerComm_ZMQ_Threads, "send_request", record)
     monitor = QueueMonitor((QueueConfig("demo", "zmq", address),))
     [row] = monitor.rows()
     assert (row["reachable"], row["manager_state"], row["error"]) == (True, "idle", None)
@@ -109,6 +123,7 @@ def test_idle_running_and_unreachable(manager: tuple[Any, str]) -> None:
     control_api.environment_close()
     control_api.wait_for_idle(timeout=60)
     monitor.close()
+    assert sent and set(sent) <= READ_REQUESTS, sorted(set(sent))
 
 
 def test_nothing_listening_is_unreachable() -> None:

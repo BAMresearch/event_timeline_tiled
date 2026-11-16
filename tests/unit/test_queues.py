@@ -8,7 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from event_timeline_tiled.adapter import create_app
-from event_timeline_tiled.queues import READ_ONLY_INTERFACE, QueueMonitor, ReadOnlyQueue
+from event_timeline_tiled.queues import (
+    READ_ONLY_INTERFACE,
+    READ_REQUESTS,
+    QueueMonitor,
+    ReadOnlyQueue,
+)
 from event_timeline_tiled.settings import QueueConfig, Settings, parse_queues
 
 ZMQ = QueueConfig("MOUSE", "zmq", "tcp://re-manager:60615")
@@ -44,13 +49,15 @@ class FakeAPI:
         self.controls.append("environment_close")
 
 
-def test_wrapper_exposes_reads_only() -> None:
+def test_wrapper_offers_reads_only() -> None:
+    """The interface the adapter's code uses. Not a sandbox: the bound methods
+    still reference the API object (see the transport tests for what is sent)."""
     api = FakeAPI()
     wrapper = ReadOnlyQueue(ZMQ, lambda _c: api)
     public = {name for name in dir(wrapper) if not name.startswith("_")}
     assert public == READ_ONLY_INTERFACE
     held = [getattr(wrapper, slot) for slot in ReadOnlyQueue.__slots__ if slot != "_lock"]
-    assert all(value is not api for value in held)  # the API object itself is not kept
+    assert all(value is not api for value in held)  # no attribute holds the API object
     for control in ("queue_start", "environment_close", "re_pause", "item_add", "manager_stop"):
         assert not hasattr(wrapper, control)
     with pytest.raises(AttributeError):
@@ -116,3 +123,28 @@ def test_queues_endpoint() -> None:
     empty = Settings(tiled_url="http://tiled.test", tiled_api_key="k")
     with TestClient(create_app(empty)) as client:
         assert client.get("/queues").json() == []
+
+
+def test_http_transport_sends_only_reads_with_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every request bluesky-queueserver-api 0.0.14 would send over HTTP."""
+    from bluesky_queueserver_api.comm_threads import ReManagerComm_HTTP_Threads
+
+    sent: list[tuple[str, str | None]] = []
+
+    def record(self: Any, *, method: str, **_kw: Any) -> dict[str, Any]:
+        sent.append((method, self.auth_key))
+        if method == "status":
+            return {"success": True, "msg": "", "manager_state": "idle", "re_state": "idle",
+                    "items_in_queue": 0, "plan_queue_uid": "q", "running_item_uid": None,
+                    "worker_environment_exists": False, "queue_stop_pending": False}  # fmt: skip
+        return {"success": True, "msg": "", "items": [], "running_item": {}, "plan_queue_uid": "q"}
+
+    monkeypatch.setattr(ReManagerComm_HTTP_Threads, "_simple_request", record)
+    config = QueueConfig("M", "http", "http://queue.test:60610", api_key="read-only-test-key")
+    monitor = QueueMonitor((config,))
+    [row] = monitor.rows()
+    monitor.rows()
+    monitor.close()
+    assert row["state"] == "idle"
+    assert {method for method, _ in sent} <= READ_REQUESTS
+    assert {key for _, key in sent} == {"read-only-test-key"}

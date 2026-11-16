@@ -65,6 +65,9 @@ class Activity:
     """Time of the last observed event, or ``None`` if none was observed (yet)."""
     age_s: float | None
     possibly_stalled: bool
+    error: str | None = None
+    """Why the events could not be read now (``forbidden``, ``unreachable``, …);
+    then ``last_event`` is from an earlier read, if any, and nothing is inferred."""
 
 
 def activity(
@@ -73,12 +76,16 @@ def activity(
     last_event: float | None,
     now: float,
     stall_after_s: float,
+    error: str | None = None,
 ) -> Activity:
     """Activity of a run. Only open runs can be possibly stalled: when the time
     since the last event (or since the start, if there was none) exceeds
-    ``stall_after_s``."""
+    ``stall_after_s``. If the events could not be read (``error``), the
+    activity is unknown: no age and never possibly stalled."""
     if status is not Status.OPEN:
         return Activity(last_event, None, False)
+    if error is not None:
+        return Activity(last_event, None, False, error)
     reference = last_event if last_event is not None else start_time
     age = None if reference is None else max(0.0, now - reference)
     return Activity(last_event, age, age is not None and age > stall_after_s)

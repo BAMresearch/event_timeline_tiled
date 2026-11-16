@@ -12,19 +12,20 @@ ROOT = Path(__file__).resolve().parents[2]
 GRAFANA = ROOT / "grafana"
 DASHBOARDS = sorted((GRAFANA / "dashboards").glob("*.json"))
 ADAPTER = "http://adapter:8000/"
-# Adapter endpoints dashboards may query (docs/technical/endpoints.md); a
-# dashboard variable stands for the run UID.
+# Adapter endpoints dashboards may query (docs/technical/endpoints.md). The
+# selected run is read only through /selection/..., which accept an empty
+# selection; /runs/{uid}/... would fail on the dashboard's initial state.
 ENDPOINTS = {
     "/health",
     "/queues",
     "/clips",
     "/clips/frame",
-    "/runs/{uid}",
-    "/runs/{uid}/streams",
-    "/runs/{uid}/views",
-    "/runs/{uid}/data",
+    "/clips/status",
+    "/selection/run",
+    "/selection/streams",
+    "/selection/fields",
+    "/selection/data",
 }
-RUN_VARIABLE = "${run:percentencode}"
 
 
 def _datasources() -> dict[str, dict[str, Any]]:
@@ -71,15 +72,22 @@ def test_dashboard_queries(path: Path) -> None:
         if "url" in node and node.get("source") == "url":
             assert node["parser"] == "backend"
             assert node["url"].startswith(ADAPTER)
-            path = node["url"][len(ADAPTER) - 1 :].split("?")[0].replace(RUN_VARIABLE, "{uid}")
+            path = node["url"][len(ADAPTER) - 1 :].split("?")[0]
             assert path in ENDPOINTS, path
+            assert "${run" not in path, "the selected run goes in a query parameter"
             # Times go through Infinity's own macros, in seconds (plan §6.1).
             assert "${__from" not in node["url"] and "${__to" not in node["url"]
 
 
+def _panels(dashboard: dict[str, Any]) -> Any:
+    for panel in dashboard.get("panels", []):
+        yield panel
+        yield from panel.get("panels", [])  # inside a collapsed row
+
+
 def test_only_the_lane_partition_transformation() -> None:
     for path in DASHBOARDS:
-        for panel in json.loads(path.read_text()).get("panels", []):
+        for panel in _panels(json.loads(path.read_text())):
             for transformation in panel.get("transformations", []):
                 assert transformation["id"] == "partitionByValues", path.name
                 assert transformation["options"]["fields"] == ["lane"], path.name
@@ -96,6 +104,21 @@ def test_timeline_frame_fields_sort_start_before_stop() -> None:
     assert times == sorted(times) == ["start", "stop"]
     assert panel["options"]["mergeValues"] is False
     assert panel["fieldConfig"]["defaults"]["custom"]["lineWidth"] == 1
+    # "Zoom to run" uses the padded bounds, never the (possibly equal) true extent.
+    [zoom] = [link for link in panel["fieldConfig"]["defaults"]["links"] if "Zoom" in link["title"]]
+    assert "zoom_from_ms" in zoom["url"] and "zoom_to_ms" in zoom["url"]
+
+
+def test_timeline_shows_whether_its_data_is_complete() -> None:
+    """Missing or stale data must be visible on the Timeline page itself (plan §5.3)."""
+    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
+    [status] = [p for p in _panels(timeline) if p["title"] == "Data status"]
+    [target] = status["targets"]
+    assert target["url"].startswith(ADAPTER + "clips/status?")
+    assert [c["selector"] for c in target["columns"]] == ["state", "message"]
+    health = json.loads((GRAFANA / "dashboards" / "health.json").read_text())
+    selected = {c["selector"] for p in _panels(health) for t in p["targets"] for c in t["columns"]}
+    assert {"status", "last_error", "data_age_s"} <= selected
 
 
 @pytest.mark.parametrize("path", DASHBOARDS, ids=lambda p: p.name)

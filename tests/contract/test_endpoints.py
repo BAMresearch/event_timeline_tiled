@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from event_timeline_tiled.adapter import app as adapter_app
 from event_timeline_tiled.adapter import create_app
 from event_timeline_tiled.settings import Settings
 
@@ -19,7 +20,7 @@ def api(catalog_server: Server) -> Iterator[tuple[TestClient, dict[str, Any]]]:
     server, manifest = catalog_server
     settings = Settings(tiled_url=server.url, tiled_api_key=server.api_key)
     now = manifest["window"][1]  # "now" is the end of the window
-    with TestClient(create_app(settings, clock=lambda: now)) as client:
+    with TestClient(create_app(settings, clock=lambda: now, data_cache_s=0)) as client:
         yield client, manifest
 
 
@@ -72,6 +73,7 @@ def test_frame_has_final_lanes_in_milliseconds(api: tuple[TestClient, dict[str, 
     assert list(rows[0]) == [
         "lane", "start", "stop", "state", "status", "uid", "label",
         "clip_from_ms", "clip_to_ms", "possibly_stalled", "stale",
+        "zoom_from_ms", "zoom_to_ms", "activity_error",
     ]  # fmt: skip
     window_end_ms = manifest["window"][1] * 1000
     by_uid = {r["uid"]: r for r in rows}
@@ -190,3 +192,83 @@ def test_data_by_kind(api: tuple[TestClient, dict[str, Any]]) -> None:
     assert series["view"] == "numeric" and len(series["rows"]) == 5
     both = {"kind": "table", "view": "summary"}
     assert client.get(f"/runs/{generic}/data", params=both).status_code == 422
+
+
+def test_window_status(api: tuple[TestClient, dict[str, Any]]) -> None:
+    client, manifest = api
+    status = client.get("/clips/status", params=_window(manifest)).json()
+    expected = sum(1 for c in manifest["runs"].values() if c["expect_in_window"])
+    assert (status["state"], status["runs"], status["truncated"]) == ("complete", expected, False)
+
+
+def test_shared_field_keeps_each_streams_units(api: tuple[TestClient, dict[str, Any]]) -> None:
+    client, manifest = api
+    uid = manifest["runs"]["shared_field"]["uid"]
+    [readings] = [v for v in client.get(f"/runs/{uid}/views").json()["views"] if v["default"]]
+    assert readings["fields"].count("shared") == 1
+    assert {(c["stream"], c["units"]) for c in readings["columns"] if c["field"] == "shared"} == {
+        ("mouse_eiger_measure", "A"),
+        ("snapshot", "V"),
+    }
+    rows = client.get(f"/runs/{uid}/data").json()["rows"]
+    shared = [(r["stream"], r["seq_num"], r["units"]) for r in rows if r["field"] == "shared"]
+    assert sorted(shared) == [
+        ("mouse_eiger_measure", 1, "A"),
+        ("mouse_eiger_measure", 2, "A"),
+        ("snapshot", 1, "V"),
+    ]
+    keys = [(r["stream"], r["seq_num"], r["field"]) for r in rows]
+    assert len(keys) == len(set(keys))  # no row twice
+
+
+def test_table_row_limit_is_exact(
+    api: tuple[TestClient, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, manifest = api
+    uid = manifest["runs"]["shared_field"]["uid"]
+    n = len(client.get(f"/runs/{uid}/data").json()["rows"])
+    monkeypatch.setattr(adapter_app, "TABLE_ROW_LIMIT", n)
+    exact = client.get(f"/runs/{uid}/data").json()
+    assert (len(exact["rows"]), exact["truncated"]) == (n, False)
+    monkeypatch.setattr(adapter_app, "TABLE_ROW_LIMIT", n - 1)
+    cut = client.get(f"/runs/{uid}/data").json()
+    assert (len(cut["rows"]), cut["truncated"]) == (n - 1, True)
+    assert "only the first" in cut["notice"]
+
+
+def test_markup_in_metadata_is_returned_as_text(
+    api: tuple[TestClient, dict[str, Any]],
+) -> None:
+    client, manifest = api
+    uid = manifest["runs"]["shared_field"]["uid"]
+    clips = {c["uid"]: c for c in client.get("/clips", params=_window(manifest)).json()["clips"]}
+    assert clips[uid]["label"].startswith("<b>S-shared</b>")
+    metadata = client.get(f"/runs/{uid}").json()["metadata"]
+    assert {"document": "start", "key": "sampleid", "value": "<b>S-shared</b>"} in metadata
+
+
+def test_selection_endpoints(api: tuple[TestClient, dict[str, Any]]) -> None:
+    client, manifest = api
+    # Nothing selected: a normal state, not an error.
+    none = client.get("/selection/run", params={"uid": ""}).json()
+    assert none["selected"] is False and none["summary"][0]["value"].startswith("Select a run")
+    assert client.get("/selection/streams", params={"uid": ""}).json() == []
+    assert client.get("/selection/fields", params={"uid": "", "stream": ""}).json() == []
+    empty = client.get("/selection/data", params={"uid": ""}).json()
+    assert (empty["rows"], empty["notice"]) == ([], none["summary"][0]["value"])
+    # A selected run: the same as /runs/{uid}/...
+    uid = manifest["runs"]["inside"]["uid"]
+    selected = client.get("/selection/run", params={"uid": uid}).json()
+    assert selected["summary"] == client.get(f"/runs/{uid}").json()["summary"]
+    assert (
+        client.get("/selection/streams", params={"uid": uid}).json()
+        == client.get(f"/runs/{uid}/streams").json()
+    )
+    data = client.get("/selection/data", params={"uid": uid}).json()
+    assert data["rows"] == client.get(f"/runs/{uid}/data").json()["rows"]
+    assert data["notice"].startswith("Readings: ")
+    fields = client.get("/selection/fields", params={"uid": uid, "stream": "baseline"}).json()
+    assert fields == client.get(f"/runs/{uid}/streams/baseline/fields").json()
+    # An unknown run is still an error; a malformed one is refused.
+    assert client.get("/selection/run", params={"uid": "no-such-run"}).status_code == 404
+    assert client.get("/selection/run", params={"uid": "a/b"}).status_code == 422

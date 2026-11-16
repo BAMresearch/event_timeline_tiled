@@ -30,6 +30,19 @@ PROCESSING_KIND = "modacor_correction"
 PROCESSING_PRODUCT = "saxs_1d_2d"
 
 
+class _UnitSignal(SynSignal):
+    """A simulated signal whose descriptor states its units."""
+
+    def __init__(self, *args: Any, units: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._units = units
+
+    def describe(self) -> dict[str, Any]:
+        described: dict[str, Any] = super().describe()
+        described[self.name]["units"] = self._units
+        return described
+
+
 @frozen
 class ProcessingOutputs:
     """Sizes of the synthetic corrected products."""
@@ -114,6 +127,22 @@ class FixtureWriter:
                 yield from bps.trigger_and_read([sig], name="primary")
 
         return self._write_captured(plan(), start, stop, exit_status)
+
+    def shared_field_run(self, md: dict[str, Any], start: float, stop: float) -> str:
+        """A MOUSE-like run whose ``snapshot`` and ``mouse_eiger_measure`` streams
+        both have a field ``shared``, in volts and amperes respectively."""
+        volts = _UnitSignal(func=lambda: 1.5, name="shared", units="V")
+        amps = _UnitSignal(func=lambda: 0.25, name="shared", units="A")
+
+        @bpp.run_decorator(md=md)
+        def plan() -> Iterator[Any]:
+            yield from bps.create("snapshot")
+            yield from bps.read(volts)
+            yield from bps.save()
+            for _ in range(2):
+                yield from bps.trigger_and_read([amps], name="mouse_eiger_measure")
+
+        return self._write_captured(plan(), start, stop, "success")
 
     def mouse_measurement_live(
         self, md: dict[str, Any], *, interval: float, n_events: int = 3, snapshot: bool = True
@@ -468,6 +497,17 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
     runs["generic_inside"] = {
         "uid": fw.scalar_run(
             {"facility": "BAM", "instrument": "generic", "station": "A"}, t0 + 1100, t0 + 1900
+        ),
+        "expect_in_window": True,
+        "expect_status": "success",
+    }
+    # Two streams with a field of the same name and different units; the
+    # sample ID holds markup, which must reach Grafana as plain text.
+    runs["shared_field"] = {
+        "uid": fw.shared_field_run(
+            {"facility": "BAM", "instrument": "MOUSE", "sampleid": "<b>S-shared</b>"},
+            t0 + 1700,
+            t0 + 1750,
         ),
         "expect_in_window": True,
         "expect_status": "success",
