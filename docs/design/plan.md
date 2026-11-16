@@ -202,6 +202,10 @@ longer are not shown, and the dashboard says so. Boundary fixtures include
 Search mechanics (Tiled 0.2.18; review 02 §§2–3): `/search` returns start and
 stop metadata with each page (`fields=metadata`, at most 300 per page; follow
 `links.next` until null), so one window costs a few requests, not one per run.
+In Tiled 0.2.21 `links.next` carries only `page[cursor]` and `page[limit]`,
+not the filters or `fields` (found in step 3; the spike paged unfiltered
+searches only), so each page repeats the request's own parameters with the
+link's paging parameters.
 Searches do not descend into nested containers, so each configured root is
 searched. Use explicit `Comparison` queries; `TimeRange` filters start times
 only. Server-side filtering is not yet shown to use an index on PostgreSQL;

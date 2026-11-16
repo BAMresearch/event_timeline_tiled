@@ -6,6 +6,7 @@ nav:
       - Overview: user/index.md
   - Technical documentation:
       - Overview: technical/index.md
+      - Endpoints: technical/endpoints.md
       - Demo stack: technical/demo-stack.md
       - Tiled access: technical/tiled-access.md
       - Development: technical/development.md

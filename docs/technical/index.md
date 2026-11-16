@@ -8,7 +8,13 @@ browser ──► proxy (nginx) ──► Grafana ──► Infinity data source
 | Part | Where | Role |
 |---|---|---|
 | Adapter | `src/event_timeline_tiled/adapter/` | FastAPI service; reads Tiled with a read-only key, serves flat tables |
-| Tiled access | `src/event_timeline_tiled/tiled_http.py` | The only module that talks to Tiled (grows into the layout module in step 3) |
+| Endpoints | `src/event_timeline_tiled/adapter/app.py` | The [endpoint contract](endpoints.md) |
+| Timeline | `src/event_timeline_tiled/timeline.py` | Window searches per root, activity of open runs, stale data, source state |
+| Clips | `src/event_timeline_tiled/clips.py` | Lane keys and names, sub-lanes, the Grafana frame |
+| Run state | `src/event_timeline_tiled/run_state.py` | Status, role and activity, defined once |
+| View table | `src/event_timeline_tiled/views.py` | The only instrument knowledge: views, labels, stall thresholds |
+| Layout | `src/event_timeline_tiled/layout.py` | The Bluesky-in-Tiled layout and query choices |
+| Tiled access | `src/event_timeline_tiled/tiled_http.py` | The only module that sends requests to Tiled: paging, errors, health |
 | Access check | `src/event_timeline_tiled/access_check.py` | `ett-check-access`: read-only check of the adapter's key ([Tiled access](tiled-access.md)) |
 | Settings | `src/event_timeline_tiled/settings.py` | `ETT_*` environment variables, validated at start-up |
 | Fixtures | `src/event_timeline_tiled/testing/` | Synthetic runs for tests and the demo stack (`testing` extra) |

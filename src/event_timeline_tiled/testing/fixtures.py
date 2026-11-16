@@ -231,6 +231,7 @@ class FixtureWriter:
         request_id: str | None = None,
         attempt: int = 1,
         reason: str | None = None,
+        partial: bool = False,
     ) -> str:
         """A processing run per the draft contract (processing-runs.md §1, §1.1).
 
@@ -240,6 +241,8 @@ class FixtureWriter:
         """
         if stop is not None and exit_status == "success" and not with_outputs and not reason:
             raise ValueError("a successful run without outputs must state a reason")
+        if partial and exit_status != "fail":
+            raise ValueError("partial outputs are a failure (processing-runs.md §1)")
         md: dict[str, Any] = {
             "facility": "BAM",
             "instrument": instrument,
@@ -260,7 +263,10 @@ class FixtureWriter:
         bundle = event_model.compose_run(metadata=md, time=start)
         docs: list[Doc] = [("start", dict(bundle.start_doc))]
         published: list[str] = []
-        if with_outputs:
+        if partial:
+            # Only part of the product was published: no product counts as published.
+            docs += self._outputs(bundle, (stop or start + 60.0) - 1.0, streams=("corrected_1d",))
+        elif with_outputs:
             docs += self._outputs(bundle, (stop or start + 60.0) - 1.0)
             published = [PROCESSING_PRODUCT]
         if stop is not None:
@@ -275,7 +281,9 @@ class FixtureWriter:
             self._writer(name, doc)
         return str(bundle.start_doc["uid"])
 
-    def _outputs(self, bundle: Any, t: float) -> list[Doc]:
+    def _outputs(
+        self, bundle: Any, t: float, streams: Sequence[str] = ("corrected_1d", "corrected_2d")
+    ) -> list[Doc]:
         n = self.outputs.curve_points
         h, w = self.outputs.image_shape
         q = np.logspace(-2, 0, n, dtype="<f4")
@@ -290,7 +298,7 @@ class FixtureWriter:
             f["image"] = image[None]
         uri = f"file://localhost{path.resolve()}"
         # field: (shape, chunks, units, extra data-key metadata)
-        streams: dict[str, dict[str, tuple[list[int], list[int], str, dict[str, Any]]]] = {
+        layout: dict[str, dict[str, tuple[list[int], list[int], str, dict[str, Any]]]] = {
             "corrected_1d": {
                 "Q": ([n], [1, n], "1/nm", {}),
                 "I": ([n], [1, n], "1/(m sr)", {}),
@@ -317,7 +325,9 @@ class FixtureWriter:
             },
         }
         docs: list[Doc] = []
-        for stream, fields in streams.items():
+        for stream, fields in layout.items():
+            if stream not in streams:
+                continue
             data_keys = {
                 k: {
                     "source": "modacor",
@@ -396,12 +406,18 @@ WINDOW = (1000.0, 2000.0)
 
 
 def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
-    """Edge cases for the window search of plan §5.4 (window ``t0 + WINDOW``).
+    """Edge cases for the window search of plan §5.4 (window ``t0 + WINDOW``),
+    run state (§5.1) and processing selection (processing-runs.md §1.2).
 
-    Returns a manifest: per case its UID, whether it should be found in the
-    window, and for processing runs their parents.
+    Returns a manifest: per case its UID, and as applicable whether it should
+    be found in the window (``expect_in_window``), its expected status
+    (``expect_status``), whether it is a complete MOUSE measurement
+    (``expect_complete``), and for processing runs their parents,
+    ``request_id`` and ``attempt``. ``selection`` lists, per measurement, the
+    expected latest processing attempt and latest usable result.
     """
     runs: dict[str, dict[str, Any]] = {}
+    status_of = {"success": "success", "fail": "failed", "abort": "aborted"}
 
     def acq(case: str, start: float, stop: float | None, expect: bool, **kw: Any) -> str:
         md = {
@@ -409,10 +425,19 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
             "instrument": "MOUSE",
             "sampleid": f"S-{case}",
             "proposal": "P-0000",
+            "destination": f"/synthetic/{case}",
+            "sample_exposure_time": 600,
         }
         md.update(kw.pop("md", {}))
+        exit_status = kw.get("exit_status", "success")
+        n_events = kw.get("n_events", 3)
         uid = fw.mouse_measurement(md, t0 + start, None if stop is None else t0 + stop, **kw)
-        runs[case] = {"uid": uid, "expect_in_window": expect}
+        runs[case] = {
+            "uid": uid,
+            "expect_in_window": expect,
+            "expect_status": "open" if stop is None else status_of[exit_status],
+            "expect_complete": stop is not None and exit_status == "success" and n_events == 3,
+        }
         return uid
 
     for case, a, b, exp in [
@@ -425,30 +450,67 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
         ("crosses_to", 1990, 2050, True),
     ]:
         acq(case, a, b, exp)
-    acq("fewer_events", 1200, 1250, True, n_events=1, snapshot=False)
-    acq("aborted", 1260, 1270, True, exit_status="abort")
+    # MOUSE: RE.stop() records "success" with fewer than three readings
+    # (plan §3.2); an interruption records "abort"; a failure records "fail".
+    acq("stopped_success", 1200, 1250, True, n_events=1, snapshot=False)
+    acq("aborted", 1260, 1270, True, n_events=2, exit_status="abort")
+    acq("failed", 1280, 1290, True, n_events=1, exit_status="fail")
     acq("open_inside", 1800, None, True)
     acq("open_20d", 2000 - 20 * DAY, None, True)
     acq("open_22d", 2000 - 22 * DAY, None, False)
+    # A run whose stored start.uid differs from its Tiled key (e.g. edited or
+    # copied metadata): written by the RunEngine, then its start metadata changed.
+    uid = acq("uid_mismatch", 1310, 1320, True)
+    node = fw.client[uid]
+    start_doc = dict(node.metadata["start"], uid="00000000-0000-4000-8000-000000000000")
+    node.update_metadata(metadata={"start": start_doc})
+    runs["uid_mismatch"]["expect_start_uid"] = start_doc["uid"]
     runs["generic_inside"] = {
         "uid": fw.scalar_run(
             {"facility": "BAM", "instrument": "generic", "station": "A"}, t0 + 1100, t0 + 1900
         ),
         "expect_in_window": True,
+        "expect_status": "success",
     }
     runs["no_instrument"] = {
         "uid": fw.scalar_run({"facility": "BAM"}, t0 + 1300, t0 + 1350),
         "expect_in_window": True,
+        "expect_status": "success",
     }
 
-    def proc(case: str, parents: list[str], start: float, stop: float | None, **kw: Any) -> None:
+    def proc(
+        case: str,
+        parents: list[str],
+        start: float,
+        stop: float | None,
+        attempt: int = 1,
+        **kw: Any,
+    ) -> None:
+        parent_uids = [runs[p]["uid"] for p in parents]
+        request_id = f"req-{'-'.join(parents)}"
         uid = fw.processing_run(
-            [runs[p]["uid"] for p in parents], t0 + start, None if stop is None else t0 + stop, **kw
+            parent_uids,
+            t0 + start,
+            None if stop is None else t0 + stop,
+            request_id=request_id,
+            attempt=attempt,
+            **kw,
         )
-        runs[case] = {"uid": uid, "derived_from": [runs[p]["uid"] for p in parents]}
+        exit_status = kw.get("exit_status", "success")
+        runs[case] = {
+            "uid": uid,
+            "derived_from": parent_uids,
+            "request_id": request_id,
+            "attempt": attempt,
+            "expect_in_window": start < WINDOW[1] and (stop is None or stop >= WINDOW[0]),
+            "expect_status": "open" if stop is None else status_of[exit_status],
+        }
 
-    proc("proc_inside_ok", ["inside"], 1700, 1760)
-    proc("proc_inside_failed", ["inside"], 1650, 1690, exit_status="fail", with_outputs=False)
+    # "inside": failed, then succeeded, then a later retry failed.
+    proc("proc_inside_failed", ["inside"], 1650, 1690, 1, exit_status="fail", with_outputs=False)
+    proc("proc_inside_ok", ["inside"], 1700, 1760, 2)
+    proc("proc_inside_retry_failed", ["inside"], 1800, 1820, 3, exit_status="fail",
+         with_outputs=False)  # fmt: skip
     proc("proc_open", ["stop_eq_from"], 1980, None, with_outputs=False)
     proc("proc_late_for_before", ["before"], 7 * DAY, 7 * DAY + 60)
     proc(
@@ -459,4 +521,28 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
         with_outputs=False,
         reason="nothing to do: synthetic no-op",
     )
-    return {"t0": t0, "window": [t0 + WINDOW[0], t0 + WINDOW[1]], "runs": runs}
+    # Two results for "crosses_to" stopping at the same time: the UID decides.
+    proc("proc_tie_a", ["crosses_to"], 2060, 2100, 1)
+    proc("proc_tie_b", ["crosses_to"], 2070, 2100, 2)
+    proc("proc_partial", ["stop_eq_to"], 2010, 2030, 1, exit_status="fail", partial=True,
+         reason="corrected_2d failed")  # fmt: skip
+    tie = max(runs["proc_tie_a"]["uid"], runs["proc_tie_b"]["uid"])
+    selection = {
+        "inside": {
+            "latest_attempt": runs["proc_inside_retry_failed"]["uid"],
+            "latest_usable": runs["proc_inside_ok"]["uid"],
+        },
+        "crosses_to": {"latest_attempt": tie, "latest_usable": tie},
+        "stop_eq_to": {"latest_attempt": runs["proc_partial"]["uid"], "latest_usable": None},
+        "spanning": {"latest_attempt": runs["proc_two_parents"]["uid"], "latest_usable": None},
+        "before": {
+            "latest_attempt": runs["proc_late_for_before"]["uid"],
+            "latest_usable": runs["proc_late_for_before"]["uid"],
+        },
+    }
+    return {
+        "t0": t0,
+        "window": [t0 + WINDOW[0], t0 + WINDOW[1]],
+        "runs": runs,
+        "selection": selection,
+    }

@@ -7,6 +7,9 @@
   means the server root (default).
 - ``ETT_OPEN_RUN_HORIZON_DAYS``: how far back open runs are searched (21).
 - ``ETT_REQUEST_TIMEOUT_S``: timeout for one request to Tiled (10).
+- ``ETT_ACTIVITY_REFRESH_S``: how often an open run's last event is re-read (60).
+- ``ETT_MAX_RUNS``: most runs returned per root and window; more are
+  reported as truncated (10000).
 """
 
 from __future__ import annotations
@@ -71,6 +74,8 @@ class Settings:
     catalog_roots: tuple[str, ...] = field(default=(), converter=_roots)
     open_run_horizon_days: float = field(default=21.0, converter=float, validator=_positive)
     request_timeout_s: float = field(default=10.0, converter=float, validator=_positive)
+    activity_refresh_s: float = field(default=60.0, converter=float, validator=_positive)
+    max_runs: int = field(default=10_000, converter=int, validator=validators.ge(1))
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -93,4 +98,6 @@ class Settings:
             catalog_roots=env.get("ETT_CATALOG_ROOTS", ""),
             open_run_horizon_days=env.get("ETT_OPEN_RUN_HORIZON_DAYS", "21"),
             request_timeout_s=env.get("ETT_REQUEST_TIMEOUT_S", "10"),
+            activity_refresh_s=env.get("ETT_ACTIVITY_REFRESH_S", "60"),
+            max_runs=env.get("ETT_MAX_RUNS", "10000"),
         )

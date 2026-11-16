@@ -1,8 +1,8 @@
-"""Read-only HTTP access to Tiled.
+"""Read-only HTTP access to Tiled: requests, paging, errors, health.
 
-This module is the only place that talks to Tiled. In step 3 it grows into the
-layout module of the plan (runs, streams, window searches); for now it checks
-reachability and read access for the health endpoint.
+This module is the only place that sends requests to Tiled. It knows Tiled's
+HTTP API but nothing about Bluesky; the Bluesky-in-Tiled layout and the
+catalogue-specific query choices are in :mod:`event_timeline_tiled.layout`.
 
 The API key is sent as ``Authorization: Apikey <key>`` and never in a URL.
 Response bodies are never copied into health details: a wrong upstream or a
@@ -12,12 +12,14 @@ maintenance page is reported by status and a fixed description only.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable, Sequence
 from enum import StrEnum
-from typing import Any
-from urllib.parse import quote
+from typing import Any, Protocol
+from urllib.parse import parse_qsl, quote, urlsplit
 
 import httpx
 from attrs import frozen
+from tiled.query_registration import default_query_registry
 
 from .settings import Settings
 
@@ -55,6 +57,38 @@ class Sample:
 
 class MalformedResponse(Exception):
     """Tiled answered, but not with the structure this adapter expects."""
+
+
+class SourceError(Exception):
+    """A request to Tiled failed. ``status`` is the health category; ``detail`` is
+    a fixed description or an HTTP status, never a response body or a credential."""
+
+    def __init__(self, status: HealthStatus, detail: str) -> None:
+        super().__init__(f"{status.value}: {detail}")
+        self.status = status
+        self.detail = detail
+
+
+class Query(Protocol):
+    """A Tiled query object (``tiled.queries``)."""
+
+    def encode(self) -> dict[str, Any]: ...
+
+
+PAGE_LIMIT = 300
+"""Tiled's maximum page size for searches (0.2.21 rejects 301)."""
+
+
+def query_params(queries: Iterable[Query]) -> dict[str, list[str]]:
+    """Encode Tiled query objects as search parameters, as Tiled's own client does."""
+    params: dict[str, list[str]] = {}
+    for query in queries:
+        name = default_query_registry.query_type_to_name[type(query)]
+        for field, value in query.encode().items():
+            if value is not None:
+                text = str(value).lower() if isinstance(value, bool) else str(value)
+                params.setdefault(f"filter[{name}][condition][{field}]", []).append(text)
+    return params
 
 
 _HTTP_STATUS = {
@@ -112,6 +146,75 @@ class TiledReader:
         except httpx.HTTPError, MalformedResponse:
             return None
         return version if isinstance(version, str) else None
+
+    def get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """GET ``/api/v1{path}`` and return the JSON object, or raise :class:`SourceError`."""
+        try:
+            response = self._http.get(path, params=params)
+        except httpx.TransportError as exc:
+            raise SourceError(HealthStatus.UNREACHABLE, type(exc).__name__) from None
+        except httpx.HTTPError as exc:
+            raise SourceError(HealthStatus.ERROR, type(exc).__name__) from None
+        if response.status_code != 200:
+            status = _HTTP_STATUS.get(response.status_code, HealthStatus.ERROR)
+            raise SourceError(status, f"HTTP {response.status_code}")
+        try:
+            return _json_object(response)
+        except MalformedResponse as exc:
+            raise SourceError(HealthStatus.ERROR, str(exc)) from None
+
+    def search(
+        self,
+        path: str,
+        queries: Sequence[Query] = (),
+        fields: Sequence[str] = ("metadata",),
+        max_items: int | None = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """All entries of one container matching ``queries`` (AND), paged at
+        :data:`PAGE_LIMIT`. Returns ``(items, truncated)``; ``truncated`` is true
+        if ``max_items`` stopped the paging early.
+
+        Tiled 0.2.21's ``links.next`` keeps only the paging parameters
+        (``page[cursor]``, ``page[limit]``) and drops the filters and ``fields``.
+        So each next page repeats this request's own parameters with just the
+        ``page[...]`` parameters taken from that link, on this client's base URL.
+        """
+        url = f"/search/{tiled_path(path)}"
+        params: dict[str, Any] = {
+            "page[limit]": PAGE_LIMIT,
+            "fields": list(fields) or "",
+            **query_params(queries),
+        }
+        items: list[dict[str, Any]] = []
+        while True:
+            body = self.get_json(url, params)
+            data, links = body.get("data"), body.get("links")
+            if not isinstance(data, list) or not isinstance(links, dict):
+                raise SourceError(HealthStatus.ERROR, "response is not a Tiled search page")
+            items.extend(item for item in data if isinstance(item, dict))
+            if max_items is not None and len(items) >= max_items:
+                return items[:max_items], True
+            next_link = links.get("next")
+            if not next_link or not data:
+                return items, False
+            paging = {
+                k: v
+                for k, v in _multi(parse_qsl(urlsplit(str(next_link)).query)).items()
+                if k.startswith("page[")
+            }
+            if not paging:
+                raise SourceError(HealthStatus.ERROR, "next link without paging parameters")
+            params = {k: v for k, v in params.items() if not k.startswith("page[")} | paging
+
+    def table_columns(self, path: str, columns: Sequence[str]) -> dict[str, list[Any]]:
+        """Whole columns of a table node (Tiled cannot select rows)."""
+        body = self.get_json(
+            f"/table/full/{tiled_path(path)}",
+            {"column": list(columns), "format": "application/json"},
+        )
+        if not all(isinstance(body.get(c), list) for c in columns):
+            raise SourceError(HealthStatus.ERROR, "table response lacks requested columns")
+        return {c: body[c] for c in columns}
 
     def check_root(self, root: str) -> RootCheck:
         """Search one catalogue root for a single entry: proves reachability and read access.
@@ -212,3 +315,15 @@ class TiledReader:
                 ok = data.status_code == 200 and len(data.content) > 0
                 return Sample(ok, f"{family} {child}: HTTP {data.status_code}")
         return Sample(False, f"no array or table within {max_depth} levels")
+
+
+def _multi(pairs: list[tuple[str, str]]) -> dict[str, list[str] | str]:
+    """Collect repeated query parameters into lists."""
+    out: dict[str, list[str] | str] = {}
+    for key, value in pairs:
+        if key in out:
+            previous = out[key]
+            out[key] = [*previous, value] if isinstance(previous, list) else [previous, value]
+        else:
+            out[key] = value
+    return out

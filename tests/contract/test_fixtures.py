@@ -133,3 +133,37 @@ def test_operando_backfill_is_retimed(tiled_server: Any, tiled_base_url: str) ->
     times = run["primary"].base["internal"].read()["time"].tolist()
     assert times[:4] == [now - 1800, now - 1200, now - 600, now]
     assert len(times) == 5 and times[4] >= now - 5
+
+
+def test_window_cases_have_expected_states(
+    window_manifest: dict[str, Any], tiled_server: Any, tiled_base_url: str
+) -> None:
+    c = _client(tiled_server, tiled_base_url)
+    runs = window_manifest["runs"]
+    for case in ("stopped_success", "aborted", "failed"):
+        md = c[runs[case]["uid"]].metadata
+        assert md["stop"]["num_events"].get("mouse_eiger_measure", 0) < 3, case
+        assert runs[case]["expect_complete"] is False
+    assert runs["inside"]["expect_complete"] is True
+    assert c[runs["failed"]["uid"]].metadata["stop"]["exit_status"] == "fail"
+    mismatch = c[runs["uid_mismatch"]["uid"]].metadata["start"]["uid"]
+    assert mismatch == runs["uid_mismatch"]["expect_start_uid"] != runs["uid_mismatch"]["uid"]
+
+
+def test_processing_attempts_are_coherent(
+    window_manifest: dict[str, Any], tiled_server: Any, tiled_base_url: str
+) -> None:
+    c = _client(tiled_server, tiled_base_url)
+    runs = window_manifest["runs"]
+    attempts = [
+        c[runs[k]["uid"]].metadata["start"]
+        for k in ("proc_inside_failed", "proc_inside_ok", "proc_inside_retry_failed")
+    ]
+    assert len({s["request_id"] for s in attempts}) == 1
+    assert [s["attempt"] for s in attempts] == [1, 2, 3]
+    a, b = (c[runs[k]["uid"]].metadata["stop"]["time"] for k in ("proc_tie_a", "proc_tie_b"))
+    assert a == b
+    partial = c[runs["proc_partial"]["uid"]]
+    assert partial.metadata["stop"]["exit_status"] == "fail"
+    assert partial.metadata["stop"]["outputs"] == []
+    assert list(partial.keys()) == ["corrected_1d"]

@@ -91,7 +91,7 @@ event_timeline_tiled = ["py.typed"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
-    "docker: needs a running Docker daemon (skipped without one)",
+    "postgres: needs PostgreSQL (ETT_TEST_POSTGRES_URI or Docker); fails without it",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:ophyd.*",

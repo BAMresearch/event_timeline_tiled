@@ -1,7 +1,7 @@
 # Testing
 
 ```sh
-uv run --locked pytest                 # everything (about 10 s)
+uv run --locked pytest                 # everything (about 35 s, starts PostgreSQL)
 uv run --locked pytest tests/unit      # fast, no server started
 uv run --locked ruff check . && uv run --locked ruff format --check .
 uv run --locked mypy src
@@ -15,8 +15,8 @@ with HDF5 arrays.
 
 | Directory | What it tests |
 |---|---|
-| `tests/unit/` | Settings, the Tiled reader's status mapping (stubbed responses), Grafana provisioning and dashboards |
-| `tests/contract/` | The adapter's `/health`, the access check's data reads and the fixture layout against a real Tiled |
+| `tests/unit/` | Settings, run state, clips and lanes, the view table, stale data, the Tiled reader's status mapping (stubbed responses), Grafana provisioning and dashboards |
+| `tests/contract/` | Window search, paging and run reads (SQLite and PostgreSQL), every endpoint, `/health`, the access check and the fixture layout against a real Tiled |
 
 ## Stack smoke test
 
@@ -32,5 +32,16 @@ and the adapter; `ett-check-access` passes inside the adapter container for a
 seeded run; and the adapter's key is refused a write. CI runs it on every
 push with generated secrets and removes the stack afterwards.
 
-PostgreSQL contract tests (required in CI) arrive in step 3 with the window
-search; until then the demo stack runs Tiled on PostgreSQL.
+## PostgreSQL
+
+Search and endpoint contract tests run on both SQLite and PostgreSQL
+(fixture `catalog_server`, marker `postgres`). PostgreSQL comes from
+`ETT_TEST_POSTGRES_URI` (an admin URL such as
+`postgresql://user:password@host:5432/postgres`; each session creates its
+own database) or, without it, from a throwaway `postgres:16` container
+started through Docker. If neither is available these tests **fail**; leave
+them out deliberately with `pytest -m "not postgres"`.
+
+All in-process Tiled servers of a session share one API key: Tiled 0.2.21's
+`build_app()` stores the single-user key in process-wide settings, so a
+second server would otherwise lock out the first.
