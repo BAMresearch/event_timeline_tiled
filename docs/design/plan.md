@@ -666,5 +666,6 @@ presets in the browser; alerting; raw MOUSE detector frames.
 
 ## 15. Open questions
 
-None at the moment. Next: step 3, starting with the fixture and test items
-listed there.
+None at the moment. Step 3 built 2026-11-16; next: Codex review of step 3
+([brief 05](reviews/brief-05-vertical-slice.md)), then the operator trial
+(step 4) in a lab session.
