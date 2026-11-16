@@ -18,6 +18,7 @@ nav:
       - Decisions: design/decisions.md
       - Processing runs: design/processing-runs.md
       - Spike results: design/spike-results.md
+      - "Upstream: electrochemistry-bluesky": design/upstream/brief-electrochemistry-bluesky.md
       - Reviews:
           - "01 Architecture: brief": design/reviews/brief-01-architecture.md
           - "01 Architecture: response": design/reviews/response-01-architecture.md

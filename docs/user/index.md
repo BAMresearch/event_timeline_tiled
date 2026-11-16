@@ -34,7 +34,9 @@ Laid out like a video editor:
 **Selecting a run:** click its block on the timeline and choose *Select run*
 (or *Zoom to run* to fit the time range to it), or click its label in a
 table. The selection stays in the URL, so a link or a reload keeps it.
-Until a run is selected, the run panels say so.
+Until a run is selected, the run panels say so. If the selected run is not
+in this Tiled (an old link or bookmark), *Selected run* says so; select
+another.
 
 ### Data status
 

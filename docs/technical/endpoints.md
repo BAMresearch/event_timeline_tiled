@@ -112,7 +112,7 @@ The State timeline frame (plan §8), a list of rows in lane order:
 | Field | Meaning |
 |---|---|
 | `lane` | final lane, unique per lane and sub-lane: sub-lanes get ` /2`, ` /3`; a name already taken gets ` (2)` |
-| `start`, `stop` | display extent, **ms**; open runs end at their `observed_at`; a closed run without a usable stop time is drawn at its start; very short clips are widened to 0.2 % of the window |
+| `start`, `stop` | display extent, **ms**; open runs end at their `observed_at`; a closed run without a usable stop time is drawn at its start; very short clips are widened to 0.2 % of the window, but never over the next clip in their sub-lane |
 | `state` | the visible value: `status`, except `stale`, `activity unknown` or `possibly stalled` for open runs |
 | `status`, `possibly_stalled`, `stale`, `activity_error` | kept separate, as in `/clips` |
 | `uid`, `label` | hidden helpers for links and tooltips |
@@ -145,6 +145,13 @@ Grafana's tables show markup as text.
 
 `stream`, `events` (from `stop.num_events` when closed, else counted),
 `events_source`, `first_event`, `last_event`, `fields`.
+
+A stream without a table yet has no rows: `TiledWriter` creates a stream's
+table with its first batch of rows (or at the stop document), so a running
+run's streams often have none. That is `events: 0` and no event times, and
+for activity no last event (the age counts from the start), never an
+error. Data views of an open run without rows say "(none in Tiled yet)" in
+their `notice`.
 
 ## `GET /runs/{uid}/streams/{stream}/fields`
 
@@ -207,11 +214,18 @@ seconds (the dashboard reads the default view twice per refresh).
 What the Timeline dashboard reads for the selected run. The same reads as
 `/runs/{uid}/...`, with the run and stream as query parameters that may be
 **empty**: nothing selected is the dashboard's normal initial state, not an
-error. An unknown run is still `404`.
+error. Nor is a selected run this Tiled does not have (a bookmark, a shared
+link, a run from another server): it gets a message, not `404`.
+`/runs/{uid}` still answers `404` for it.
 
 | Endpoint | With a selection | With `uid=` empty |
 |---|---|---|
-| `/selection/run?uid` | `{"selected": true, "run", "summary"}` as `/runs/{uid}` (no metadata) | `{"selected": false, "summary": [{"key": "run", "value": "Select a run …"}]}` |
+| `/selection/run?uid` | `{"selected": true, "found": true, "run", "summary"}` as `/runs/{uid}` (no metadata) | `{"selected": false, "found": false, "summary": [{"key": "run", "value": "Select a run …"}]}` |
 | `/selection/streams?uid` | as `/runs/{uid}/streams` | `[]` |
 | `/selection/fields?uid&stream` | as `/runs/{uid}/streams/{stream}/fields` | `[]` (also with `stream=` empty) |
 | `/selection/data?uid&view|kind&max_points` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
+
+With a `uid` that is not found: `/selection/run` gives `{"selected": true,
+"found": false, "summary": [{"key": "run", "value": "The selected run is not
+in Tiled …"}]}`, `/selection/data` no rows with that `notice`, and
+`/selection/streams` and `/selection/fields` `[]`.

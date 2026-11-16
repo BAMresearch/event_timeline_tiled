@@ -25,3 +25,15 @@ Recorded because the meaning of these fields changed during review:
   oldest successful fetch over all roots.
 - Open runs whose events could not be read have `activity_error`, no age
   and `possibly_stalled: false`, and the frame state `activity unknown`.
+
+After the electrochemistry trial (2026-11-16):
+
+- `/selection/...` with a `uid` this Tiled does not have answers with a
+  message (`found: false`) instead of `404`; `/selection/run` has the new
+  field `found`. `/runs/{uid}` is unchanged.
+- A stream without a table yet (events still in `TiledWriter`'s batch) has
+  no rows: `events: 0`, no activity error, instead of `502`/`activity_error:
+  not_found`.
+- In the frame, sub-lanes are allocated by true extent, and a short clip is
+  widened only up to the next clip in its sub-lane: runs queued back to
+  back no longer move to a sub-lane at coarse zoom.
