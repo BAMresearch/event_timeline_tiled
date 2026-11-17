@@ -144,6 +144,28 @@ class FixtureWriter:
 
         return self._write_captured(plan(), start, stop, "success")
 
+    def electrochemistry_run(
+        self, md: dict[str, Any], start: float, stop: float | None, *, n_events: int = 5
+    ) -> str:
+        """An electrochemistry-bluesky-like run: ``readout`` with hinted
+        ``voltage_v`` and ``current_a`` and an unhinted ``t_s``, and a
+        ``sequence_events`` stream (step markers)."""
+        rng = np.random.default_rng(2)
+        voltage = _UnitSignal(
+            func=lambda: 3.7 + 0.01 * rng.random(), name="voltage_v", units="V", kind="hinted"
+        )
+        current = _UnitSignal(func=lambda: 1e-3, name="current_a", units="A", kind="hinted")
+        elapsed = _UnitSignal(func=lambda: 0.0, name="t_s", units="s", kind="normal")
+        step = _UnitSignal(func=lambda: 0.0, name="event_t_s", units="s", kind="normal")
+
+        @bpp.run_decorator(md=md)
+        def plan() -> Iterator[Any]:
+            yield from bps.trigger_and_read([step], name="sequence_events")
+            for _ in range(n_events):
+                yield from bps.trigger_and_read([voltage, current, elapsed], name="readout")
+
+        return self._write_captured(plan(), start, stop, "success")
+
     def mouse_measurement_live(
         self, md: dict[str, Any], *, interval: float, n_events: int = 3, snapshot: bool = True
     ) -> str:
@@ -527,6 +549,21 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
             {"facility": "BAM", "instrument": "MOUSE", "sampleid": "<b>S-shared</b>"},
             t0 + 1700,
             t0 + 1750,
+        ),
+        "expect_in_window": True,
+        "expect_status": "success",
+    }
+    # electrochemistry-bluesky's set-up names: no facility, a station.
+    runs["electrochemistry"] = {
+        "uid": fw.electrochemistry_run(
+            {
+                "instrument": "electrochemistry-k2460",
+                "station": "simulator",
+                "measurement_id": "example-rest",
+                "sample_id": "S-echem",
+            },
+            t0 + 1400,
+            t0 + 1450,
         ),
         "expect_in_window": True,
         "expect_status": "success",

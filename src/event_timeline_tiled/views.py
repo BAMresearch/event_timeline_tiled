@@ -105,7 +105,19 @@ MOUSE = InstrumentEntry(
     ),
 )
 
-VIEW_TABLE: tuple[InstrumentEntry, ...] = (MOUSE,)
+# electrochemistry-bluesky (Keithley 2460): one run per run-sheet row, with
+# ``readout`` (hinted voltage_v and current_a) and ``sequence_events``. No
+# rules: its views are the generic fallback's, driven by the instrument's own
+# hints. Rows reach Tiled at least every ``flush_s`` (default 10 s); 10 minutes
+# also allows sparse sampling steps.
+ELECTROCHEMISTRY_K2460 = InstrumentEntry(
+    instrument="electrochemistry-k2460",
+    stall_after_s=10 * 60,
+    label_keys=("measurement_id", "sample_id"),
+    rules=(),
+)
+
+VIEW_TABLE: tuple[InstrumentEntry, ...] = (MOUSE, ELECTROCHEMISTRY_K2460)
 
 FALLBACK_STALL_AFTER_S = 30 * 60
 FALLBACK_LABEL_KEYS = ("plan_name", "scan_id")
@@ -204,11 +216,18 @@ def _summary() -> ResolvedView:
 def _fallback(streams: Mapping[str, StreamInfo]) -> list[ResolvedView]:
     """Hinted numeric scalars against time; else all numeric scalars; else a
     bounded table; else nothing plottable. The stream is ``primary`` if
-    present, else the first stream with events."""
+    present, else the first stream with hinted numeric fields, else the first
+    stream with events, and only then ``baseline`` (Bluesky's start/end
+    snapshot)."""
     candidates = [s for s in streams.values() if s.has_table]
     stream = streams.get("primary") if "primary" in streams else None
     if stream is None or not stream.has_table:
-        stream = candidates[0] if candidates else None
+        main = [s for s in candidates if s.name != "baseline"]
+        hinted_streams = [
+            s for s in main if set(s.hints) & set(_scalar_fields(s, numeric_only=True))
+        ]
+        ordered = hinted_streams or main or candidates
+        stream = ordered[0] if ordered else None
     if stream is None:
         return [
             ResolvedView(

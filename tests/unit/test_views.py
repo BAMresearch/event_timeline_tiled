@@ -72,3 +72,37 @@ def test_labels_and_stall_thresholds_come_from_the_table() -> None:
     assert label(processing) == "saxs · attempt 2"
     assert stall_after_s(run(instrument="MOUSE")) == 1200
     assert stall_after_s(run(instrument="other")) == 1800
+
+
+ECHEM_STREAMS = [
+    stream("baseline", {"x": NUM}, ("x",)),
+    stream("aux", {"y": NUM}),
+    stream(
+        "readout",
+        {"voltage_v": {**NUM, "units": "V"}, "current_a": {**NUM, "units": "A"}, "t_s": NUM},
+        ("voltage_v", "current_a"),
+    ),
+    stream("sequence_events", {"event_t_s": NUM}),
+]
+
+
+def test_electrochemistry_views_follow_its_hints() -> None:
+    """No rules of its own: the fallback's hinted view, on the hinted stream
+    (not ``baseline``, not the first stream by name)."""
+    start = {"instrument": "electrochemistry-k2460", "station": "simulator"}
+    views = resolve(run(**start), Role.ACQUISITION, ECHEM_STREAMS)
+    first = views[0]
+    assert (first.name, first.kind, first.streams) == ("hinted", ViewKind.TIMESERIES, ("readout",))
+    assert first.fields == ("voltage_v", "current_a")
+    assert first.units == {"voltage_v": "V", "current_a": "A"}
+    labelled = run(**start, measurement_id="example-rest", sample_id="S-1", plan_name="x")
+    assert label(labelled) == "example-rest · S-1"
+    assert stall_after_s(run(**start)) == 600
+
+
+def test_fallback_without_hints_takes_the_first_stream_but_baseline() -> None:
+    plain = [stream("baseline", {"x": NUM}, ("x",)), stream("b", {"y": NUM}), stream("c", {})]
+    views = resolve(run(), Role.ACQUISITION, plain)
+    assert (views[0].name, views[0].streams) == ("numeric", ("b",))
+    only_baseline = resolve(run(), Role.ACQUISITION, plain[:1])
+    assert (only_baseline[0].name, only_baseline[0].streams) == ("hinted", ("baseline",))

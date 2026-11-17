@@ -284,6 +284,26 @@ def test_selection_endpoints(api: tuple[TestClient, dict[str, Any]]) -> None:
     assert client.get("/selection/run", params={"uid": "a/b"}).status_code == 422
 
 
+def test_electrochemistry_run(api: tuple[TestClient, dict[str, Any]]) -> None:
+    """electrochemistry-bluesky's set-up names (no facility) and hints."""
+    client, manifest = api
+    uid = manifest["runs"]["electrochemistry"]["uid"]
+    clips = {c["uid"]: c for c in client.get("/clips", params=_window(manifest)).json()["clips"]}
+    clip = clips[uid]
+    assert (clip["lane"], clip["lane_key"], clip["label"]) == (
+        "electrochemistry-k2460 simulator",
+        "-/electrochemistry-k2460/simulator/acquisition",
+        "example-rest · S-echem",
+    )
+    views = client.get(f"/runs/{uid}/views").json()
+    assert views["default"] == "hinted"
+    data = client.get("/selection/data", params={"uid": uid, "kind": "timeseries"}).json()
+    # Hints are keyed by device; PostgreSQL's JSONB does not keep key order.
+    assert (data["stream"], set(data["fields"])) == ("readout", {"voltage_v", "current_a"})
+    assert data["units"] == {"voltage_v": "V", "current_a": "A"}
+    assert len(data["rows"]) == 10
+
+
 def test_open_run_before_its_first_batch(api: tuple[TestClient, dict[str, Any]]) -> None:
     """TiledWriter writes event rows in batches: a running run's streams exist
     before their tables do. That is "no events yet", not an error."""
