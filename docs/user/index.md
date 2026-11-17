@@ -31,7 +31,12 @@ Laid out like a video editor:
   `executing_queue`, `paused`, or `unreachable` when it does not answer),
   the running plan, since when it runs, and the number of queued items;
   and *Data status* (below).
-- **Below the timeline, collapsed:** *Stream fields*. Click a stream in
+- **Below the timeline:** *Run metadata*, everything the selected run's
+  start and stop documents record, one row per key (nested keys dotted, for
+  example `versions.bluesky`): sample and configuration identifiers, plan
+  parameters, the exit status and the event count per stream. Very long
+  values end in `…` where they were cut.
+- **Below that, collapsed:** *Stream fields*. Click a stream in
   *Streams*, then open this row to see its fields, types, shapes and units.
 
 **Selecting a run:** click its block on the timeline and choose *Select run*

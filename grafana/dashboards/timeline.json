@@ -1522,12 +1522,122 @@
    }
   },
   {
+   "type": "table",
+   "title": "Run metadata",
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 24,
+    "h": 10
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "table",
+     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "metadata",
+     "columns": [
+      {
+       "selector": "document",
+       "text": "document",
+       "type": "string"
+      },
+      {
+       "selector": "key",
+       "text": "key",
+       "type": "string"
+      },
+      {
+       "selector": "value",
+       "text": "value",
+       "type": "string"
+      }
+     ]
+    }
+   ],
+   "description": "The selected run's start and stop documents, one row per key (nested keys dotted). Long values end in \u2026 where they were cut.",
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "no run selected"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "document"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 90
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "key"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 280
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "value"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "value"
+      },
+      "properties": [
+       {
+        "id": "custom.wrapText",
+        "value": true
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
    "type": "row",
    "title": "Stream fields (choose a stream in Streams)",
    "collapsed": true,
    "gridPos": {
     "x": 0,
-    "y": 30,
+    "y": 40,
     "w": 24,
     "h": 1
    },
@@ -1537,7 +1647,7 @@
      "title": "Fields of ${stream}",
      "gridPos": {
       "x": 0,
-      "y": 31,
+      "y": 41,
       "w": 24,
       "h": 8
      },

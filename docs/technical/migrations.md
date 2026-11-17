@@ -43,3 +43,10 @@ After the electrochemistry trial (2026-11-16):
   names are unchanged.
 - View table: new entry `electrochemistry-k2460` (labels, stall threshold;
   its views are the fallback's).
+
+After the first look at the lab Tiled (2026-11-17):
+
+- `/selection/run` has the new fields `metadata` and `metadata_truncated`,
+  the same as `/runs/{uid}` (empty when nothing is selected or the run is
+  not found), for the dashboard's *Run metadata* panel. Additive: existing
+  fields are unchanged.

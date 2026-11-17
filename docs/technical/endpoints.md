@@ -224,12 +224,12 @@ link, a run from another server): it gets a message, not `404`.
 
 | Endpoint | With a selection | With `uid=` empty |
 |---|---|---|
-| `/selection/run?uid` | `{"selected": true, "found": true, "run", "summary"}` as `/runs/{uid}` (no metadata) | `{"selected": false, "found": false, "summary": [{"key": "run", "value": "Select a run …"}]}` |
+| `/selection/run?uid` | `{"selected": true, "found": true, "run", "summary", "metadata", "metadata_truncated"}` as `/runs/{uid}` | `{"selected": false, "found": false, "summary": [{"key": "run", "value": "Select a run …"}], "metadata": [], "metadata_truncated": false}` |
 | `/selection/streams?uid` | as `/runs/{uid}/streams` | `[]` |
 | `/selection/fields?uid&stream` | as `/runs/{uid}/streams/{stream}/fields` | `[]` (also with `stream=` empty) |
 | `/selection/data?uid&view|kind&max_points&axis` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
 
 With a `uid` that is not found: `/selection/run` gives `{"selected": true,
 "found": false, "summary": [{"key": "run", "value": "The selected run is not
-in Tiled …"}]}`, `/selection/data` no rows with that `notice`, and
+in Tiled …"}], "metadata": [], "metadata_truncated": false}`, `/selection/data` no rows with that `notice`, and
 `/selection/streams` and `/selection/fields` `[]`.

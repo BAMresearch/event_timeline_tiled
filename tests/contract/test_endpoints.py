@@ -252,6 +252,7 @@ def test_selection_endpoints(api: tuple[TestClient, dict[str, Any]]) -> None:
     # Nothing selected: a normal state, not an error.
     none = client.get("/selection/run", params={"uid": ""}).json()
     assert none["selected"] is False and none["summary"][0]["value"].startswith("Select a run")
+    assert (none["metadata"], none["metadata_truncated"]) == ([], False)
     assert client.get("/selection/streams", params={"uid": ""}).json() == []
     assert client.get("/selection/fields", params={"uid": "", "stream": ""}).json() == []
     empty = client.get("/selection/data", params={"uid": ""}).json()
@@ -259,7 +260,10 @@ def test_selection_endpoints(api: tuple[TestClient, dict[str, Any]]) -> None:
     # A selected run: the same as /runs/{uid}/...
     uid = manifest["runs"]["inside"]["uid"]
     selected = client.get("/selection/run", params={"uid": uid}).json()
-    assert selected["summary"] == client.get(f"/runs/{uid}").json()["summary"]
+    whole = client.get(f"/runs/{uid}").json()
+    for key in ("summary", "metadata", "metadata_truncated"):
+        assert selected[key] == whole[key]
+    assert {"document": "stop", "key": "exit_status", "value": "success"} in selected["metadata"]
     assert (
         client.get("/selection/streams", params={"uid": uid}).json()
         == client.get(f"/runs/{uid}/streams").json()
@@ -274,6 +278,7 @@ def test_selection_endpoints(api: tuple[TestClient, dict[str, Any]]) -> None:
     gone = client.get("/selection/run", params={"uid": "no-such-run"}).json()
     assert (gone["selected"], gone["found"]) == (True, False)
     assert gone["summary"][0]["value"].startswith("The selected run is not in Tiled")
+    assert gone["metadata"] == []
     assert client.get("/selection/streams", params={"uid": "no-such-run"}).json() == []
     assert (
         client.get("/selection/fields", params={"uid": "no-such-run", "stream": "x"}).json() == []

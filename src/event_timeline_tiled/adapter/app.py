@@ -676,10 +676,13 @@ def create_app(
         if run is None:
             message = NOT_FOUND if uid else NO_SELECTION
             return {"selected": bool(uid), "found": False,
-                    "summary": [{"key": "run", "value": message}]}  # fmt: skip
+                    "summary": [{"key": "run", "value": message}],
+                    "metadata": [], "metadata_truncated": False}  # fmt: skip
         summary = summary_of(run)
+        metadata, truncated = metadata_rows(run)
         return {"selected": True, "found": True, "run": summary,
-                "summary": summary_rows(summary)}  # fmt: skip
+                "summary": summary_rows(summary),
+                "metadata": metadata, "metadata_truncated": truncated}  # fmt: skip
 
     @app.get("/selection/streams")
     def selected_streams(uid: SELECTED = "") -> list[dict[str, Any]]:
