@@ -368,7 +368,7 @@ plus a default. Endpoints only resolve what the table says.
 
 | Match | View | Grafana panel (to confirm in the spike) |
 |---|---|---|
-| MOUSE measurement | readings: `baseline`, `snapshot`, `mouse_eiger_measure` | Table |
+| MOUSE measurement | readings: `baseline`, `snapshot`, `mouse_eiger_measure` (default); time series of `mouse_eiger_measure`: its hinted numeric scalars, else all numeric scalars (for *Run time series* and the trend) | Table; Time series |
 | MOUSE configuration / vacuum run | summary + baseline | Table |
 | MOUSE processing run, usable | corrected 1D I(Q), log–log; uncertainty as I−σ and I+σ bounding curves plus a table (XY chart has no error bars) | XY chart, log scale on both X and Y fields |
 | MOUSE processing run, usable | corrected 2D image | Text panel with an `<img>` via the image route (section 6) |

@@ -37,8 +37,17 @@ class ViewSpec:
     name: str = field(validator=validators.matches_re(r"^[a-z][a-z0-9_]*$"))
     title: str
     kind: ViewKind
-    streams: tuple[str, ...] = ()
-    """Streams the view reads, in display order (table views)."""
+    streams: tuple[str, ...] = field(default=())
+    """Streams the view reads, in display order (table views); exactly one
+    for a time series."""
+    hinted_only: bool = False
+    """Time series: only the stream's hinted numeric scalars (as the
+    fallback's ``hinted`` view), else all its numeric scalars (``numeric``)."""
+
+    @streams.validator
+    def _one_stream_per_series(self, _attribute: Any, streams: tuple[str, ...]) -> None:
+        if self.kind is ViewKind.TIMESERIES and len(streams) != 1:
+            raise ValueError("a time series view reads exactly one stream")
 
 
 @frozen
@@ -98,6 +107,18 @@ MOUSE = InstrumentEntry(
                     "Readings",
                     ViewKind.TABLE,
                     ("mouse_eiger_measure", "snapshot", "baseline"),
+                ),
+                # For the time series and the trend: the detector's hinted
+                # fields, or all its numeric scalars if none are hinted.
+                ViewSpec(
+                    "hinted",
+                    "Hinted fields",
+                    ViewKind.TIMESERIES,
+                    ("mouse_eiger_measure",),
+                    hinted_only=True,
+                ),
+                ViewSpec(
+                    "numeric", "Numeric fields", ViewKind.TIMESERIES, ("mouse_eiger_measure",)
                 ),
                 SUMMARY,
             ),
@@ -207,6 +228,24 @@ def _table_view(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedVi
     )  # fmt: skip
 
 
+def _series_view(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedView:
+    [name] = spec.streams
+    stream = streams.get(name)
+    fields: list[str] = []
+    if stream is not None and stream.has_table:
+        numeric = _scalar_fields(stream, numeric_only=True)
+        fields = [f for f in stream.hints if f in numeric] if spec.hinted_only else numeric
+    reason = ""
+    if stream is None or not stream.has_table:
+        reason = f"{name} has no events"
+    elif not fields:
+        reason = f"{name} has no {'hinted ' if spec.hinted_only else ''}numeric fields"
+    return ResolvedView(
+        spec.name, spec.title, spec.kind, (name,), tuple(fields), _units(stream, fields),
+        available=not reason, reason=reason,
+    )  # fmt: skip
+
+
 def _summary() -> ResolvedView:
     return ResolvedView(
         SUMMARY.name, SUMMARY.title, ViewKind.SUMMARY, (), (), {}, available=True, reason=""
@@ -283,7 +322,11 @@ def resolve(run: RunRecord, role: Role, streams: Sequence[StreamInfo]) -> list[R
     for rule in entry.rules if entry else ():
         if rule.matches(run, role):
             resolved = [
-                _summary() if spec.kind is ViewKind.SUMMARY else _table_view(spec, by_name)
+                _summary()
+                if spec.kind is ViewKind.SUMMARY
+                else _series_view(spec, by_name)
+                if spec.kind is ViewKind.TIMESERIES
+                else _table_view(spec, by_name)
                 for spec in rule.views
             ]
             if any(v.available and v.kind is not ViewKind.SUMMARY for v in resolved):

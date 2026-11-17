@@ -2,9 +2,11 @@
 
 from typing import Any
 
+import pytest
+
 from event_timeline_tiled.layout import RunRecord, StreamInfo
 from event_timeline_tiled.run_state import Role
-from event_timeline_tiled.views import ViewKind, label, resolve, stall_after_s
+from event_timeline_tiled.views import ViewKind, ViewSpec, label, resolve, stall_after_s
 
 NUM = {"dtype": "number", "shape": [], "source": "sim"}
 
@@ -28,10 +30,38 @@ MOUSE_STREAMS = [
 
 def test_mouse_measurement_defaults_to_readings() -> None:
     views = resolve(run(instrument="MOUSE"), Role.ACQUISITION, MOUSE_STREAMS)
-    assert [v.name for v in views] == ["readings", "summary"]
+    # No hinted detector fields here: "hinted" is listed, unavailable, after the others.
+    assert [(v.name, v.available) for v in views] == [
+        ("readings", True),
+        ("numeric", True),
+        ("summary", True),
+        ("hinted", False),
+    ]
     readings = views[0]
     assert readings.streams == ("mouse_eiger_measure", "snapshot", "baseline")
     assert readings.units == {"roi": "counts"}
+    numeric = views[1]
+    assert (numeric.kind, numeric.streams) == (ViewKind.TIMESERIES, ("mouse_eiger_measure",))
+    assert (numeric.fields, dict(numeric.units)) == (("roi", "stats"), {"roi": "counts"})
+
+
+def test_mouse_time_series_prefers_the_detectors_hinted_fields() -> None:
+    """The first available time series is what Run time series and the trend show."""
+    detector = MOUSE_STREAMS[1]
+    hinted = [MOUSE_STREAMS[0], stream(detector.name, dict(detector.data_keys), ("roi",))]
+    views = resolve(run(instrument="MOUSE"), Role.ACQUISITION, hinted)
+    series = [v for v in views if v.available and v.kind is ViewKind.TIMESERIES]
+    assert [(v.name, v.fields) for v in series] == [
+        ("hinted", ("roi",)),
+        ("numeric", ("roi", "stats")),
+    ]
+    assert views[0].name == "readings"  # the default is still the table
+
+
+def test_a_time_series_view_reads_exactly_one_stream() -> None:
+    for streams in ((), ("a", "b")):
+        with pytest.raises(ValueError, match="exactly one stream"):
+            ViewSpec("x", "X", ViewKind.TIMESERIES, streams)
 
 
 def test_mouse_configuration_and_vacuum_runs() -> None:

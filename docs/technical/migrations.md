@@ -52,6 +52,10 @@ After the first look at the lab Tiled (2026-11-17):
   fields are unchanged.
 - New endpoints `/runs/{uid}/trend` and `/selection/trend`: the run's time
   series over the runs like it in a window. Additive.
+- View table: MOUSE measurements gain the time series views `hinted` and
+  `numeric` of `mouse_eiger_measure` (same meaning as the fallback's views of
+  those names). Their default view is still `readings`; `kind=timeseries`
+  and the trend now find a view for them instead of none.
 - `/clips/frame` has the new parameter `min_lanes` (default 0: unchanged).
   With it, the frame may end with empty lanes whose fields are `null`
   except `lane`, `start` and `stop`; consumers that pass it must not expect
