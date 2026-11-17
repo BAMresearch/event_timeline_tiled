@@ -157,7 +157,7 @@ def test_generic_fallback_time_series(api: tuple[TestClient, dict[str, Any]]) ->
     data = client.get(f"/runs/{uid}/data", params={"max_points": 10}).json()
     assert data["fields"] == ["env_temperature"] and len(data["rows"]) == 5
     assert data["decimation"]["every"] == 1 and data["rows"][0]["time"] > 1e12  # milliseconds
-    assert set(data["rows"][0]) == {"time", "field", "value"}
+    assert set(data["rows"][0]) == {"time", "field", "series", "value"}
 
 
 def test_processing_run_has_no_plottable_data_yet(api: tuple[TestClient, dict[str, Any]]) -> None:
@@ -298,10 +298,20 @@ def test_electrochemistry_run(api: tuple[TestClient, dict[str, Any]]) -> None:
     views = client.get(f"/runs/{uid}/views").json()
     assert views["default"] == "hinted"
     data = client.get("/selection/data", params={"uid": uid, "kind": "timeseries"}).json()
-    # Hints are keyed by device; PostgreSQL's JSONB does not keep key order.
-    assert (data["stream"], set(data["fields"])) == ("readout", {"voltage_v", "current_a"})
+    assert (data["stream"], data["fields"]) == ("readout", ["voltage_v", "current_a"])
     assert data["units"] == {"voltage_v": "V", "current_a": "A"}
     assert len(data["rows"]) == 10
+    # A second axis for fields in other units than the first field's.
+    for axis, field, series in (
+        (1, "voltage_v", "voltage_v [V]"),
+        (2, "current_a", "current_a [A]"),
+    ):
+        part = client.get(
+            "/selection/data", params={"uid": uid, "kind": "timeseries", "axis": axis}
+        ).json()
+        assert (part["axis"], part["fields"]) == (axis, [field])
+        assert {(r["field"], r["series"]) for r in part["rows"]} == {(field, series)}
+        assert len(part["rows"]) == 5
 
 
 def test_open_run_before_its_first_batch(api: tuple[TestClient, dict[str, Any]]) -> None:

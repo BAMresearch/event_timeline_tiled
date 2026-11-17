@@ -39,6 +39,7 @@ SELECTED = Annotated[str, Query(pattern=f"^({UID_PATTERN})?$")]
 """A dashboard selection: a run key or stream name, or empty for none."""
 VIEW = Annotated[str | None, Query(pattern=r"^[a-z][a-z0-9_]*$")]
 MAX_POINTS = Annotated[int, Query(ge=10, le=20_000)]
+AXIS = Annotated[int | None, Query(ge=1, le=2)]
 
 METADATA_MAX_ROWS = 2000
 """Metadata rows per run at most (start and stop together)."""
@@ -221,7 +222,9 @@ def create_app(
         if queue_api
         else QueueMonitor(settings.queues, clock=clock)
     )
-    data_cache: OrderedDict[tuple[str, str, str, int], tuple[float, dict[str, Any]]] = OrderedDict()
+    data_cache: OrderedDict[tuple[str, str, str, int, int | None], tuple[float, dict[str, Any]]] = (
+        OrderedDict()
+    )
     data_lock = threading.Lock()
 
     @asynccontextmanager
@@ -476,7 +479,11 @@ def create_app(
         }
 
     def data_of(
-        run: RunRecord, view: str | None, kind: ViewKind | None, max_points: int
+        run: RunRecord,
+        view: str | None,
+        kind: ViewKind | None,
+        max_points: int,
+        axis: int | None = None,
     ) -> dict[str, Any]:
         views = views_of(run)
         if kind is not None:
@@ -493,7 +500,7 @@ def create_app(
             return {"view": chosen.name, "kind": chosen.kind.value, "rows": [],
                     "truncated": False, "reason": chosen.reason,
                     "notice": f"{chosen.title}: {chosen.reason}"}  # fmt: skip
-        key = (run.root, run.key, chosen.name, max_points)
+        key = (run.root, run.key, chosen.name, max_points, axis)
         now = time.monotonic()
         with data_lock:
             cached = data_cache.get(key)
@@ -508,7 +515,7 @@ def create_app(
             elif chosen.kind is ViewKind.TABLE:
                 body = _table(run, chosen)
             else:
-                body = _timeseries(run, chosen, max_points)
+                body = _timeseries(run, chosen, max_points, axis)
         except SourceError as exc:
             raise _upstream(exc) from None
         with data_lock:
@@ -520,13 +527,18 @@ def create_app(
 
     @app.get("/runs/{uid}/data")
     def run_data(
-        uid: UID, view: VIEW = None, kind: ViewKind | None = None, max_points: MAX_POINTS = 2000
+        uid: UID,
+        view: VIEW = None,
+        kind: ViewKind | None = None,
+        max_points: MAX_POINTS = 2000,
+        axis: AXIS = None,
     ) -> dict[str, Any]:
         """Rows for one view: ``view`` by name, else the first available view of
-        ``kind``, else the default view."""
+        ``kind``, else the default view. ``axis`` (time series only): 1 for the
+        fields in the first field's units, 2 for the others."""
         if view and kind:
             raise HTTPException(422, "give view or kind, not both")
-        return data_of(find(uid), view, kind, max_points)
+        return data_of(find(uid), view, kind, max_points, axis)
 
     def _table(run: RunRecord, view: ResolvedView) -> dict[str, Any]:
         """Long rows, stream by stream in view order, each stream with its own
@@ -573,12 +585,20 @@ def create_app(
                 "truncated": truncated, "row_limit": TABLE_ROW_LIMIT,
                 "notice": notice}  # fmt: skip
 
-    def _timeseries(run: RunRecord, view: ResolvedView, max_points: int) -> dict[str, Any]:
-        """Long rows (time, field, value) from one stream: at most ``max_points``
-        rows over all fields. Events are decimated to ``max_points // fields``:
-        every k-th from the first, and always the last."""
+    def _timeseries(
+        run: RunRecord, view: ResolvedView, max_points: int, axis: int | None = None
+    ) -> dict[str, Any]:
+        """Long rows (time, field, series, value) from one stream: at most
+        ``max_points`` rows over the fields returned. Events are decimated to
+        ``max_points // fields``: every k-th from the first, and always the last.
+        With ``axis``, only the fields of that axis: 1 for the fields in the
+        first field's units, 2 for all others."""
         [stream] = view.streams
-        fields = list(view.fields[:max_points])
+        wanted = list(view.fields)
+        left = [f for f in wanted if wanted and view.units.get(f) == view.units.get(wanted[0])]
+        if axis is not None:
+            wanted = left if axis == 1 else [f for f in wanted if f not in left]
+        fields = wanted[:max_points]
         columns = layout.event_columns(run, stream, fields)
         n = len(columns["time"])
         budget = max_points // len(fields) if fields else 0
@@ -592,6 +612,8 @@ def create_app(
             indices = [*range(0, n - 1, every), n - 1]
         non_finite = 0
         rows = []
+        # The legend's name: the field and its units, so each axis is readable.
+        series = {f: f"{f} [{view.units[f]}]" if f in view.units else f for f in fields}
         for i in indices:
             t = columns["time"][i]
             if not isinstance(t, int | float) or not math.isfinite(t):
@@ -602,20 +624,22 @@ def create_app(
             for f in fields:
                 value = _json_value(columns[f][i])
                 non_finite += value is None
-                rows.append({"time": round(t * 1000), "field": f, "value": value})
+                rows.append({"time": round(t * 1000), "field": f, "series": series[f],
+                             "value": value})  # fmt: skip
         # Infinity converts long to wide only for ascending times; event times
         # usually follow seq_num, but nothing guarantees it.
         rows.sort(key=lambda r: r["time"])
-        fields_cut = len(fields) < len(view.fields)
+        fields_cut = len(fields) < len(wanted)
         notice = f"{view.title} of {stream}: {len(indices)} of {n} events"
         if fields_cut:
-            notice += f", first {len(fields)} of {len(view.fields)} fields"
+            notice += f", first {len(fields)} of {len(wanted)} fields"
         if n == 0 and run.stop is None:
             notice += NOT_WRITTEN
         return {
             "view": view.name,
             "kind": view.kind.value,
             "stream": stream,
+            "axis": axis,
             "fields": fields,
             "units": dict(view.units),
             "rows": rows,
@@ -673,6 +697,7 @@ def create_app(
         view: VIEW = None,
         kind: ViewKind | None = None,
         max_points: MAX_POINTS = 2000,
+        axis: AXIS = None,
     ) -> dict[str, Any]:
         if view and kind:
             raise HTTPException(422, "give view or kind, not both")
@@ -680,7 +705,7 @@ def create_app(
         if run is None:
             notice = NOT_FOUND if uid else NO_SELECTION
             return {"view": None, "rows": [], "truncated": False, "notice": notice}
-        return data_of(run, view, kind, max_points)
+        return data_of(run, view, kind, max_points, axis)
 
     return app
 

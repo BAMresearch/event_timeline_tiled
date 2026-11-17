@@ -121,6 +121,19 @@ def test_timeline_shows_whether_its_data_is_complete() -> None:
     assert {"status", "last_error", "data_age_s"} <= selected
 
 
+def test_time_series_puts_other_units_on_a_second_axis() -> None:
+    """Axis 1: fields in the first field's units; axis 2, on the right: the rest.
+    Generic: no field names or units in the dashboard."""
+    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
+    [panel] = [p for p in _panels(timeline) if p["type"] == "timeseries"]
+    axes = {t["refId"]: t["url"].rsplit("axis=", 1)[1] for t in panel["targets"]}
+    assert axes == {"A": "1", "B": "2"}
+    [right] = panel["fieldConfig"]["overrides"]
+    assert right["matcher"] == {"id": "byFrameRefID", "options": "B"}
+    assert right["properties"] == [{"id": "custom.axisPlacement", "value": "right"}]
+    assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.labels.series}"
+
+
 # Columns the adapter may return as null (docs/technical/endpoints.md), per table.
 NULLABLE = {
     "Failed and aborted": {"reason"},

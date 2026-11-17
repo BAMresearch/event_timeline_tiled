@@ -148,8 +148,9 @@ class FixtureWriter:
         self, md: dict[str, Any], start: float, stop: float | None, *, n_events: int = 5
     ) -> str:
         """An electrochemistry-bluesky-like run: ``readout`` with hinted
-        ``voltage_v`` and ``current_a`` and an unhinted ``t_s``, and a
-        ``sequence_events`` stream (step markers)."""
+        ``voltage_v`` and ``current_a`` (one device, in that order, as
+        electrochemistry-bluesky writes them to Tiled) and an unhinted ``t_s``,
+        and a ``sequence_events`` stream (step markers)."""
         rng = np.random.default_rng(2)
         voltage = _UnitSignal(
             func=lambda: 3.7 + 0.01 * rng.random(), name="voltage_v", units="V", kind="hinted"
@@ -164,7 +165,8 @@ class FixtureWriter:
             for _ in range(n_events):
                 yield from bps.trigger_and_read([voltage, current, elapsed], name="readout")
 
-        return self._write_captured(plan(), start, stop, "success")
+        hints = {"readout": {"k2460": {"fields": ["voltage_v", "current_a"]}}}
+        return self._write_captured(plan(), start, stop, "success", descriptor_hints=hints)
 
     def mouse_measurement_live(
         self, md: dict[str, Any], *, interval: float, n_events: int = 3, snapshot: bool = True
@@ -268,6 +270,7 @@ class FixtureWriter:
         stop: float | None,
         exit_status: ExitStatus,
         writer: TiledWriter | None = None,
+        descriptor_hints: dict[str, dict[str, Any]] | None = None,
     ) -> str:
         docs: list[Doc] = []
         token = self._re.subscribe(lambda name, doc: docs.append((name, copy.deepcopy(doc))))
@@ -283,6 +286,8 @@ class FixtureWriter:
                 doc["exit_status"] = exit_status
                 if exit_status != "success":
                     doc["reason"] = f"synthetic {exit_status}"
+            if name == "descriptor" and doc["name"] in (descriptor_hints or {}):
+                doc["hints"] = (descriptor_hints or {})[doc["name"]]
             (writer or self._writer)(name, doc)
         return str(docs[0][1]["uid"])
 

@@ -179,7 +179,7 @@ Kinds: `table`, `timeseries`, `summary`. View names in version 1:
 `readings`, `baseline` (MOUSE), `hinted`, `numeric`, `events`, `no_data`
 (fallback), `summary` (all runs).
 
-## `GET /runs/{uid}/data?view|kind&max_points`
+## `GET /runs/{uid}/data?view|kind&max_points&axis`
 
 Rows of one view (default view if `view` is omitted). Every response has a
 `notice`: one line saying what is shown (and what is not).
@@ -189,8 +189,12 @@ Rows of one view (default view if `view` is omitted). Every response has a
   (`columns` of the view). At most 2000 rows; `truncated` is true only if
   there are more. Reading stops at the first row beyond the limit.
 - `timeseries`: one stream, long format,
-  `{"stream", "fields", "units", "rows": [{"time": <ms>, "field", "value"}],
+  `{"stream", "axis", "fields", "units", "rows": [{"time": <ms>, "field", "series", "value"}],
   "truncated", "decimation": {"method", "every", "source_rows", "events", "returned", "max_points"}, "non_finite"}`.
+  `series` is the field with its units (`voltage_v [V]`), for legends.
+  `axis=1` returns only the fields in the units of the view's first field,
+  `axis=2` all others (other units or none), for a second y axis; without
+  `axis`, all fields. Ignored by other kinds.
   `max_points` (10–20000, default 2000) bounds the **rows** returned, over
   all fields: each field gets `max_points // fields` events, every k-th from
   the first and always the last. With more fields than `max_points`, only
@@ -223,7 +227,7 @@ link, a run from another server): it gets a message, not `404`.
 | `/selection/run?uid` | `{"selected": true, "found": true, "run", "summary"}` as `/runs/{uid}` (no metadata) | `{"selected": false, "found": false, "summary": [{"key": "run", "value": "Select a run …"}]}` |
 | `/selection/streams?uid` | as `/runs/{uid}/streams` | `[]` |
 | `/selection/fields?uid&stream` | as `/runs/{uid}/streams/{stream}/fields` | `[]` (also with `stream=` empty) |
-| `/selection/data?uid&view|kind&max_points` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
+| `/selection/data?uid&view|kind&max_points&axis` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
 
 With a `uid` that is not found: `/selection/run` gives `{"selected": true,
 "found": false, "summary": [{"key": "run", "value": "The selected run is not

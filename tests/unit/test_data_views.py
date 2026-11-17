@@ -16,8 +16,12 @@ from event_timeline_tiled.layout import RunRecord
 from event_timeline_tiled.settings import Settings
 
 
-def fake_tiled(n_events: int, fields: list[str], start: dict[str, Any]) -> httpx.MockTransport:
+def fake_tiled(
+    n_events: int, fields: list[str], start: dict[str, Any], units: dict[str, str] | None = None
+) -> httpx.MockTransport:
     data_keys = {f: {"dtype": "number", "shape": [], "source": "sim"} for f in fields}
+    for f, u in (units or {}).items():
+        data_keys[f]["units"] = u
     metadata = {
         "start": {"uid": "r", "time": 0.0, **start},
         "stop": {"time": 100.0, "exit_status": "success"},
@@ -75,6 +79,18 @@ def test_the_point_budget_covers_all_fields() -> None:
         cut = client.get("/runs/r/data", params={"max_points": 10}).json()
     assert len(cut["rows"]) <= 10 and cut["truncated"] is True
     assert cut["fields"] == many[:10] and "first 10 of 12 fields" in cut["notice"]
+
+
+def test_fields_in_other_units_go_to_the_second_axis() -> None:
+    units = {"a": "V", "b": "A", "d": "V"}  # c has none
+    with _client(fake_tiled(3, ["a", "b", "c", "d"], {"instrument": "generic"}, units)) as client:
+        both = client.get("/runs/r/data").json()
+        left = client.get("/runs/r/data", params={"axis": 1}).json()
+        right = client.get("/runs/r/data", params={"axis": 2}).json()
+        assert client.get("/runs/r/data", params={"axis": 3}).status_code == 422
+    assert (both["axis"], both["fields"]) == (None, ["a", "b", "c", "d"])
+    assert (left["fields"], right["fields"]) == (["a", "d"], ["b", "c"])
+    assert {(r["field"], r["series"]) for r in right["rows"]} == {("b", "b [A]"), ("c", "c")}
 
 
 def test_metadata_is_plain_json_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:

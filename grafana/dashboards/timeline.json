@@ -1050,7 +1050,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&kind=timeseries&max_points=2000",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&kind=timeseries&max_points=2000&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1065,6 +1065,50 @@
       {
        "selector": "field",
        "text": "field",
+       "type": "string"
+      },
+      {
+       "selector": "series",
+       "text": "series",
+       "type": "string"
+      },
+      {
+       "selector": "value",
+       "text": "value",
+       "type": "number"
+      }
+     ]
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "timeseries",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&kind=timeseries&max_points=2000&axis=2",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "rows",
+     "columns": [
+      {
+       "selector": "time",
+       "text": "time",
+       "type": "timestamp_epoch"
+      },
+      {
+       "selector": "field",
+       "text": "field",
+       "type": "string"
+      },
+      {
+       "selector": "series",
+       "text": "series",
        "type": "string"
       },
       {
@@ -1087,14 +1131,27 @@
    },
    "fieldConfig": {
     "defaults": {
-     "displayName": "${__field.labels.field}",
+     "displayName": "${__field.labels.series}",
      "noValue": "nothing to plot (see the line above)",
      "custom": {
       "drawStyle": "line",
       "showPoints": "auto"
      }
     },
-    "overrides": []
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byFrameRefID",
+       "options": "B"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
    }
   },
   {
