@@ -7,6 +7,15 @@
   means the server root (default).
 - ``ETT_OPEN_RUN_HORIZON_DAYS``: how far back open runs are searched (21).
 - ``ETT_REQUEST_TIMEOUT_S``: timeout for one request to Tiled (10).
+- ``ETT_ACTIVITY_REFRESH_S``: how often an open run's last event is re-read (60).
+- ``ETT_MAX_RUNS``: most runs returned per root and window; more are
+  reported as truncated (10000).
+- ``ETT_QUEUES``: RE Managers whose status is shown, comma-separated
+  ``instrument=zmq:tcp://host:60615`` (0MQ, straight to the RE Manager) or
+  ``instrument=http:http://host:60610`` (Bluesky HTTP Server); empty: none.
+  For HTTP, the API key (scopes ``read:status``, ``read:queue``) comes from
+  the file named by ``ETT_QUEUE_<INSTRUMENT>_API_KEY_FILE`` (instrument in
+  upper case, other characters as ``_``).
 """
 
 from __future__ import annotations
@@ -62,6 +71,51 @@ def _positive(_instance: object, attribute: object, value: float) -> None:
         )
 
 
+_QUEUE = re.compile(r"^(?P<name>[A-Za-z0-9_.-]+)=(?P<transport>zmq|http):(?P<address>\S+)$")
+
+
+@frozen
+class QueueConfig:
+    """One RE Manager to show the status of (plan §5.5). Read-only use only."""
+
+    instrument: str
+    transport: str = field(validator=validators.in_(("zmq", "http")))
+    address: str
+    api_key: str | None = field(default=None, repr=False)
+
+    def __attrs_post_init__(self) -> None:
+        scheme = {"zmq": ("tcp",), "http": ("http", "https")}[self.transport]
+        parts = urlsplit(self.address)
+        if parts.scheme not in scheme or not parts.hostname or parts.username or parts.password:
+            raise ValueError(
+                f"queue {self.instrument!r}: {self.transport} address must be "
+                f"{' or '.join(s + '://host:port' for s in scheme)} without credentials"
+            )
+
+    @staticmethod
+    def env_name(instrument: str) -> str:
+        return "ETT_QUEUE_" + re.sub(r"[^A-Z0-9]", "_", instrument.upper()) + "_API_KEY_FILE"
+
+
+def parse_queues(value: str, env: Mapping[str, str]) -> tuple[QueueConfig, ...]:
+    configs = []
+    for entry in (part.strip() for part in value.split(",")):
+        if not entry:
+            continue
+        match = _QUEUE.match(entry)
+        if match is None:
+            raise ValueError(f"ETT_QUEUES entry {entry!r} is not instrument=zmq|http:address")
+        key = None
+        key_file = env.get(QueueConfig.env_name(match["name"]), "")
+        if key_file:
+            key = Path(key_file).read_text(encoding="utf-8").strip() or None
+        configs.append(QueueConfig(match["name"], match["transport"], match["address"], key))
+    names = [c.instrument for c in configs]
+    if len(set(names)) != len(names):
+        raise ValueError("ETT_QUEUES names an instrument twice")
+    return tuple(configs)
+
+
 @frozen
 class Settings:
     """Validated adapter configuration. The API key is never shown in ``repr``."""
@@ -71,6 +125,9 @@ class Settings:
     catalog_roots: tuple[str, ...] = field(default=(), converter=_roots)
     open_run_horizon_days: float = field(default=21.0, converter=float, validator=_positive)
     request_timeout_s: float = field(default=10.0, converter=float, validator=_positive)
+    activity_refresh_s: float = field(default=60.0, converter=float, validator=_positive)
+    max_runs: int = field(default=10_000, converter=int, validator=validators.ge(1))
+    queues: tuple[QueueConfig, ...] = ()
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -93,4 +150,7 @@ class Settings:
             catalog_roots=env.get("ETT_CATALOG_ROOTS", ""),
             open_run_horizon_days=env.get("ETT_OPEN_RUN_HORIZON_DAYS", "21"),
             request_timeout_s=env.get("ETT_REQUEST_TIMEOUT_S", "10"),
+            activity_refresh_s=env.get("ETT_ACTIVITY_REFRESH_S", "60"),
+            max_runs=env.get("ETT_MAX_RUNS", "10000"),
+            queues=parse_queues(env.get("ETT_QUEUES", ""), env),
         )

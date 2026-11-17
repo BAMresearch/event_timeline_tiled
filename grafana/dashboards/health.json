@@ -64,6 +64,16 @@
               "type": "string"
             },
             {
+              "selector": "last_error",
+              "text": "last window fetch error",
+              "type": "string"
+            },
+            {
+              "selector": "data_age_s",
+              "text": "data age (s)",
+              "type": "number"
+            },
+            {
               "selector": "tiled_version",
               "text": "tiled_version",
               "type": "string"

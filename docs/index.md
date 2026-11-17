@@ -10,4 +10,4 @@ viewer for the selected run top right, run details and channels top left.
 - [Design](design/plan.md): the plan, decisions, the processing-run contract,
   the spike results and the design reviews.
 
-Status: prototype, step 2 of the plan (scaffold and demo stack).
+Status: prototype, step 3 of the plan (vertical slice: timeline dashboard and adapter).

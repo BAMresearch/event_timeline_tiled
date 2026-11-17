@@ -95,7 +95,10 @@ overwritten. Reprocessing creates a new run. (MoDaCor's `TiledSink` can
 overwrite arrays; the publisher must not use that for processing runs.)
 
 **Ordering**: within a result family (`product` + `pipeline.name`) and
-measurement, "latest" is by stop time, ties broken by start-document UID. The
+measurement, "latest" is by stop time, ties broken by start-document UID
+(the greater UID, compared as text, is the later). Open attempts have no stop
+time: they are shown as open, and "latest attempt" means the latest finished
+one. The
 viewer shows the latest attempt and the latest usable result.
 
 Incompatible changes increase `processing_schema_version`; the viewer keeps

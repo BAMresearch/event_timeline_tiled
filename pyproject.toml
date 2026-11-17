@@ -20,6 +20,7 @@ dependencies = [
     "attrs>=24.2",
     "numpy>=2,<3",
     "pillow>=11,<14",
+    "bluesky-queueserver-api>=0.0.14,<0.1",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -35,6 +36,7 @@ testing = [
     "event-model>=1.23.1,<1.24",
     "ophyd>=1.11,<1.12",
     "h5py>=3.11,<4",
+    "bluesky-queueserver>=0.0.26,<0.1",
 ]
 
 [project.urls]
@@ -46,6 +48,7 @@ ett-adapter = "event_timeline_tiled.adapter.app:main"
 ett-check-access = "event_timeline_tiled.access_check:main"
 ett-demo-bootstrap = "event_timeline_tiled.testing.bootstrap:main"
 ett-demo-seed = "event_timeline_tiled.testing.seed:main"
+ett-demo-queue = "event_timeline_tiled.testing.queue_driver:main"
 
 [dependency-groups]
 # A Tiled server with PostgreSQL support: tests and the demo stack's Tiled image.
@@ -76,6 +79,8 @@ constraint-dependencies = [
     "bluesky-tiled-plugins==2.0.2",
     "event-model==1.23.1",
     "ophyd==1.11.0",
+    "bluesky-queueserver==0.0.26",
+    "bluesky-queueserver-api==0.0.14",
 ]
 
 [tool.setuptools.dynamic]
@@ -91,7 +96,8 @@ event_timeline_tiled = ["py.typed"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
-    "docker: needs a running Docker daemon (skipped without one)",
+    "postgres: needs PostgreSQL (ETT_TEST_POSTGRES_URI or Docker); fails without it",
+    "queueserver: starts redis-server and an RE Manager (skipped without redis-server, fails with ETT_REQUIRE_REDIS=1)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:ophyd.*",
@@ -115,7 +121,7 @@ python_version = "3.14"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["bluesky.*", "ophyd.*", "tiled.*", "bluesky_tiled_plugins.*"]
+module = ["bluesky.*", "ophyd.*", "tiled.*", "bluesky_tiled_plugins.*", "bluesky_queueserver_api.*"]
 follow_untyped_imports = true
 
 # The fixture writers drive untyped Bluesky/ophyd APIs (plans, decorators,

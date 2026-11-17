@@ -87,8 +87,11 @@ already preferred a central Tiled when several instruments are watched.
 Implemented in the instrument repositories, not here:
 
 - Start documents carry `facility` (`"BAM"`) and `instrument` (`"MOUSE"`,
-  `"electrochemistry"`), set in `RE.md` in the QueueServer start-up, and
-  `station` where one instrument runs several independent stations.
+  `"electrochemistry-k2460"`), set in `RE.md` in the QueueServer start-up,
+  and `station` where one instrument runs several independent stations.
+  electrochemistry-bluesky (v0.2.0) writes `instrument` and `station`
+  (`"k2460-<serial>"`, `"simulator"` or a name from the session) and
+  `facility` only when the session sets it.
 - Processing runs copy `facility`, `instrument` and `station` from their
   measurement.
 
@@ -98,9 +101,9 @@ derived from it. Runs without `instrument` go to a labelled fallback: the
 configured catalogue root they were found under if that identifies an
 instrument, else `(unknown)`. A fallback never creates one lane per run.
 
-Today neither instrument sets these keys (both use `RunEngine({})`), so
-existing MOUSE runs land in the fallback lane. Setting them in `mouse_bluesky`
-is a prerequisite for the operator trial.
+MOUSE does not set these keys yet (`RunEngine({})`), so existing MOUSE runs
+land in the fallback lane. Setting them in `mouse_bluesky` is a prerequisite
+for the operator trial ([brief](upstream/brief-mouse-bluesky.md)).
 
 ### 3.2 MOUSE runs (from `mouse_bluesky` source; not yet checked against real descriptors)
 
@@ -179,7 +182,11 @@ and are marked stale.
 Last successful data fetch, last attempt, age of the data shown, and a
 sanitised error category; partial failures (one search failed) are reported
 as such. Empty results ("no runs in this window") are distinct from
-unavailable data.
+unavailable data. The Timeline page shows this itself (*Data status*, from
+`/clips/status`): a root never read, a root failing now (its runs shown as
+last seen, each up to its own last observation), a truncated window and
+failed activity reads, per root. A failed activity read is reported as
+unknown activity, never turned into "possibly stalled".
 
 ### 5.4 Which runs are in the window
 
@@ -189,9 +196,15 @@ union of two server-side searches per configured catalogue root, each fully
 paged (review 02 found the earlier four-search union missed runs stopping
 exactly at `to`):
 
-1. **closed:** `start.time < to` and `stop.time ≥ from`;
-2. **open:** no `stop` key (`KeyPresent('stop', exists=False)`, not
-   `Eq('stop', None)`), `start.time < to` and `start.time ≥ to − horizon`.
+1. **open:** no `stop` key (`KeyPresent('stop', exists=False)`, not
+   `Eq('stop', None)`), `start.time < to` and `start.time ≥ to − horizon`;
+2. **closed:** `start.time < to` and `stop.time ≥ from`.
+
+The open search goes first, so a run closing between the two is found closed
+by the second (review 05); a key found by both is kept closed. The two
+searches are not one snapshot. Above `ETT_MAX_RUNS` per root, open runs are
+kept first, and the window is reported as truncated; each search asks for
+one item more than the cap, so exactly the cap is not truncation.
 
 The **open-run horizon** defaults to **21 days**: operando battery experiments
 run for up to 14 days, plus a margin. It is anchored to the window end, not to
@@ -202,6 +215,10 @@ longer are not shown, and the dashboard says so. Boundary fixtures include
 Search mechanics (Tiled 0.2.18; review 02 §§2–3): `/search` returns start and
 stop metadata with each page (`fields=metadata`, at most 300 per page; follow
 `links.next` until null), so one window costs a few requests, not one per run.
+In Tiled 0.2.21 `links.next` carries only `page[cursor]` and `page[limit]`,
+not the filters or `fields` (found in step 3; the spike paged unfiltered
+searches only), so each page repeats the request's own parameters with the
+link's paging parameters.
 Searches do not descend into nested containers, so each configured root is
 searched. Use explicit `Comparison` queries; `TimeRange` filters start times
 only. Server-side filtering is not yet shown to use an index on PostgreSQL;
@@ -325,6 +342,8 @@ use its backend parser (JSONata) only, and pass times with its macros
 | `GET /health` | last successful fetch, last attempt, data age, error category, versions |
 | `GET /clips?from&to&page` | per run: `uid, start_uid, uid_mismatch, lane_key, lane, role, start, stop, status, last_event, possibly_stalled, stale, label`, plus `truncated` |
 | `GET /clips/frame?from&to` | the timeline projection of section 8: final lane/sub-lane, `start_ms`, `end_ms`, `status`, hidden helpers. **Milliseconds**, because these are Grafana time fields; all other endpoints use seconds |
+| `GET /clips/status?from&to` | whether the window's data is complete, with one line per problem (section 5.3) |
+| `GET /selection/...?uid` | the run endpoints below for the dashboard's selected run, where an empty selection is not an error |
 | `GET /runs/{uid}` | summary + flattened start/stop metadata |
 | `GET /runs/{uid}/streams` | stream, event count (from the stop document when closed), first/last event time (from the `time` column, selected run only) |
 | `GET /runs/{uid}/streams/{stream}/fields` | field, dtype, shape, units, hinted |
@@ -354,7 +373,7 @@ plus a default. Endpoints only resolve what the table says.
 | MOUSE processing run, usable | corrected 1D I(Q), log–log; uncertainty as I−σ and I+σ bounding curves plus a table (XY chart has no error bars) | XY chart, log scale on both X and Y fields |
 | MOUSE processing run, usable | corrected 2D image | Text panel with an `<img>` via the image route (section 6) |
 | anything else (fallback) | hinted numeric scalars against time; else all numeric scalars; else a bounded table; else "no plottable data" | Time series / Table |
-| electrochemistry (later) | voltage and current against time | Time series; XY chart |
+| electrochemistry-k2460 | the fallback, driven by its hints: voltage and current of `readout` against time; labels `measurement_id` · `sample_id`; possibly stalled after 10 minutes | Time series |
 
 The table also holds each instrument's possibly-stalled threshold.
 
@@ -393,8 +412,10 @@ running Grafana.
 - **Selection:** two tooltip data links, "Select run"
   (`?var-run=${__data.fields["uid"]}&${__url_time_range}`, keeping relative
   ranges like `now-12h`) and "Zoom to run" (`from`/`to` from
-  `clip_from_ms`/`clip_to_ms`, with a finite end for open runs and padding
-  for zero-length runs). Opening in the same tab; whether navigation avoids
+  `zoom_from_ms`/`zoom_to_ms`: the true extent `clip_from_ms`/`clip_to_ms`
+  padded by 5 %, at least 5 s, so also zero-length runs get a range). Panels
+  for the selected run read `/selection/...`, where an empty selection is
+  a normal state. Opening in the same tab; whether navigation avoids
   a full reload is a gate check, and one-click selection is not promised.
   The hidden variable `run` survives refreshes and stays selected when the
   run leaves the window.
@@ -415,7 +436,7 @@ running Grafana.
   Auto grid viewer proven to keep the layout, or small detail dashboards per
   view kind, linked from the overview. Dashboards test view kinds, never
   instrument names.
-- A header line: "Recorded runs from Tiled" and data age.
+- A header line: "Recorded runs from Tiled", and *Data status* (section 5.3).
 - The queue-status panel (section 5.5), top left, for each instrument with a
   configured RE Manager.
 
@@ -649,7 +670,38 @@ presets in the browser; alerting; raw MOUSE detector frames.
   separate volumes, long-lived demo services as uid 10001, Docker only
   (decisions D-004, D-005).
 
+- Step 3 in progress (2026-11-16): adapter endpoints and the version 1
+  timeline dashboard built and checked on the demo stack. Found on the way:
+  Tiled's `links.next` drops search filters (§5.4); SQL-backed event tables
+  return rows in storage order, so the layout module sorts by `seq_num`;
+  Infinity types auto-detected time columns as numbers, so time-series data
+  is long format with Infinity's `timeseries` query format (no dashboard
+  transformation). The 0.2.8 client check and query plans on 0.2.21 are
+  done (decision D-006). Queue status built: `/queues` over 0MQ or HTTP
+  through a read-only wrapper, a Queue panel, a real RE Manager in tests and
+  the demo stack ([queue status](../technical/queues.md)).
+
+- Review 05 folded in 2026-11-16
+  ([disposition](reviews/disposition-05.md)): *Data status* on the Timeline
+  page (`/clips/status`), truncation by look-ahead with open runs kept
+  first, the open search before the closed one, per-root and per-run
+  observation times, failed activity reads reported and throttled,
+  `/selection/...` endpoints for an empty selection, per-stream table
+  columns, a strict point budget, bounded metadata, unique lane names,
+  padded zoom bounds, transport-level read-only queue tests, and a 30 s
+  refresh default until step 4 (decision D-007).
+
+- Electrochemistry trial 2026-11-16, on electrochemistry-bluesky's
+  simulator with its local Tiled store and a real RE Manager: fixed a
+  running run's streams before their first batch, runs queued back to back
+  splitting into sub-lanes, and selections of runs the server does not
+  have. Upstream ([brief](upstream/brief-electrochemistry-bluesky.md),
+  [reply](upstream/response-electrochemistry-bluesky.md)): electrochemistry-
+  bluesky v0.2.0 names its set-up, flushes rows every `flush_s` (10 s),
+  hints voltage and current, and keeps local tables in SQLite. Its view
+  table entry follows (§7). MOUSE: [brief](upstream/brief-mouse-bluesky.md).
+
 ## 15. Open questions
 
-None at the moment. Next: step 3, starting with the fixture and test items
-listed there.
+None at the moment. Step 3 built and reviewed 2026-11-16; next: the
+operator trial (step 4) in a lab session.

@@ -9,6 +9,10 @@ cp deploy/.env.example deploy/.env      # replace every "change-me"
 docker compose -f deploy/compose.yaml --profile demo up -d --build
 ```
 
+Open <http://localhost:8080>, sign in as `admin` (password `GF_ADMIN_PASSWORD`
+from `deploy/.env`) and open the **Timeline** dashboard; the history appears
+within about two minutes of the first start.
+
 | Service | What it does |
 |---|---|
 | `proxy` | nginx on `127.0.0.1:8080`: Grafana, plus `/run-images/` for signed-in users |
@@ -19,6 +23,8 @@ docker compose -f deploy/compose.yaml --profile demo up -d --build
 | `demo-bootstrap` | One-shot, as root: creates two service keys and hands the key and processed volumes to uid 10001 |
 | `demo-seed` | Writes a day of history, then keeps acquiring live MOUSE runs |
 | `demo-operando` | Keeps a generic instrument's three-day run open, a reading every 15 s |
+| `redis`, `re-manager` | A real RE Manager with simulated devices, for the queue panel |
+| `demo-queue` | Keeps that RE Manager busy with `demo_measurement` items (demo only) |
 
 Everything long-lived runs as uid 10001. Docker Compose only: the proxy
 relies on Docker's embedded DNS, and Podman is untested.

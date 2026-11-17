@@ -3,6 +3,44 @@
 Short records of decisions made while building; the plan's §14 holds the
 maintainer's decisions from the design phase. Newest first.
 
+## D-007 — Timeline refresh stays at 30 s until the operator trial (2026-11-16)
+
+Plan §1 asks for a 5–10 s refresh. Each refresh of the Timeline dashboard
+runs four window requests (*Runs in range*, *Failed and aborted*, *Data
+status*, the timeline), each two searches per catalogue root, plus at most
+one activity read per open run per minute and the selected run's reads.
+On the demo stack (D-006) a window costs about 65 ms, so 10 s would be
+fine there, but the lab Tiled's cost is not measured yet. The default stays
+30 s, with 10 s in the refresh picker; step 4 measures the lab window queries
+and event-column reads per viewer and then sets the default.
+
+## D-006 — Window search and old-client checks on Tiled 0.2.21 (2026-11-16)
+
+Measured on the demo stack (Tiled 0.2.21, PostgreSQL 16, multi-user), with
+5,000 run entries under one container (6,565 nodes in the catalogue):
+
+- A 12-hour window (both searches, through the adapter's layout module):
+  median 65 ms, maximum 78 ms over ten windows; 87 hits.
+- Closed runs: Tiled orders by `nodes.id` with a `LIMIT`, so PostgreSQL walks
+  the primary key over **all nodes of all parents** and filters (3.6 ms,
+  6,523 rows removed). Open runs (`KeyPresent` compiles to
+  `metadata #> '{stop}' IS NULL`) use the parent index (1.0 ms).
+- So the closed-run search grows with the whole catalogue, streams and tables
+  included, not with the root's runs. This is one measured scale point, not
+  proof that time filtering is indexed at any catalogue size. Fine for MOUSE for years; on a much
+  larger catalogue, an index on `(parent, (metadata #> '{start,time}'))` or an
+  upstream change to the ordering would be the fix. The 0.2.19 index change
+  (`ix_nodes_metadata`, GIN `jsonb_path_ops`) does not take part in these
+  range queries.
+
+MOUSE's client stack (Tiled 0.2.8, Bluesky 1.14.6) writes measurements, open
+runs and processing runs with registered HDF5 arrays into 0.2.21, and the
+adapter finds and reads them all (`deploy/old_client_check.py`, also run in
+CI). One difference: with the 0.2.8 client, streams whose fields are all
+external also get an `internal` table holding only `seq_num` and `time`; the
+layout module treats such streams as having no scalar data either way. The
+check against the lab server's real version remains a lab-session item.
+
 ## D-005 — The access check never writes (2026-11-16)
 
 `ett-check-access` proves a key is read-only from the scopes Tiled reports

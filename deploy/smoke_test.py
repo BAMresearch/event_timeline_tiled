@@ -13,6 +13,11 @@ Checks, through the published proxy and inside the containers:
    real data readable);
 4. the adapter's key is refused a valid node-create request (this is the
    disposable demo Tiled, so a wrongly privileged key would only write there).
+5. every panel query of the timeline dashboard (collapsed rows included)
+   returns without error with no run selected, with a MOUSE measurement and
+   with the generic instrument's run selected; the timeline frame has clips,
+   Data status has a row, and the generic run has a time series.
+6. the demo RE Manager is reachable through /queues (read-only).
 
 Prints statuses only, never credentials. Exit status 0 if all pass.
 """
@@ -116,13 +121,52 @@ r = httpx.post("http://tiled:8000/api/v1/metadata/",
 print(r.status_code)
 """
 
-FIRST_RUN = """
+SAMPLE_RUNS = """
 import httpx
 key = open("/secrets/adapter.key").read().strip()
-r = httpx.get("http://tiled:8000/api/v1/search/", params={"page[limit]": 1, "fields": ""},
+r = httpx.get("http://tiled:8000/api/v1/search/", params={"page[limit]": 300, "fields": "metadata"},
               headers={"Authorization": "Apikey " + key})
 data = r.json()["data"] if r.status_code == 200 else []
-print(data[0]["id"] if data else "")
+def first(test):
+    for item in data:
+        start = (item["attributes"]["metadata"] or {}).get("start") or {}
+        if test(start):
+            return item["id"]
+    return ""
+print(first(lambda s: s.get("instrument") == "MOUSE" and s.get("sampleid")),
+      first(lambda s: s.get("instrument") == "generic"))
+"""
+
+
+def panel_queries(run: str, stream: str) -> list[tuple[str, int, str]]:
+    """(panel title, rows, error) for every query of the timeline dashboard,
+    with ``run`` and ``stream`` as the selection (empty: none)."""
+    status, body = http("/api/dashboards/uid/ett-timeline")
+    if status != 200:
+        return [("dashboard", 0, f"HTTP {status}")]
+    now = time.time()
+    out = []
+    panels = json.loads(body)["dashboard"]["panels"]
+    for panel in [*panels, *(p for row in panels for p in row.get("panels", []))]:
+        for target in panel.get("targets", []):
+            url = target["url"].replace("${run:percentencode}", run)
+            query = dict(target, url=url.replace("${stream:percentencode}", stream))
+            window = {"from": str(int((now - 86400) * 1000)), "to": str(int(now * 1000))}
+            status, body = http("/api/ds/query", {"queries": [query], **window})
+            if status != 200:
+                out.append((panel["title"], 0, f"HTTP {status}"))
+                continue
+            result = json.loads(body)["results"][target.get("refId", "A")]
+            frames = result.get("frames", [])
+            rows = sum(len(f["data"]["values"][0]) for f in frames if f["data"]["values"])
+            out.append((panel["title"] or "notice", rows, (result.get("error") or "")[:120]))
+    return out
+
+
+QUEUES = """
+import httpx
+rows = httpx.get("http://localhost:8000/queues", timeout=30).json()
+print(rows[0]["state"] if rows else "no RE Manager configured")
 """
 
 
@@ -144,13 +188,14 @@ def main() -> None:
         row.get("status") == "ok" for row in rows
     ))  # fmt: skip
 
-    run = ""
+    run, generic = "", ""
 
     def seeded() -> bool:
-        nonlocal run
-        result = in_adapter("python", "-c", FIRST_RUN)
-        run = result.stdout.strip() if result.returncode == 0 else ""
-        return bool(run)
+        nonlocal run, generic
+        result = in_adapter("python", "-c", SAMPLE_RUNS)
+        found = result.stdout.split() if result.returncode == 0 else []
+        run, generic = found if len(found) == 2 else ("", "")
+        return bool(run and generic)
 
     wait("seeded runs readable with the adapter key", seeded)
     result = in_adapter("ett-check-access", "--run", run, "--denied", "no-such-node")
@@ -159,6 +204,32 @@ def main() -> None:
     result = in_adapter("python", "-c", WRITE_PROBE)
     status_text = result.stdout.strip()
     check("adapter key refused a write", status_text in {"401", "403"}, f"HTTP {status_text}")
+
+    wait(
+        "queue status of the demo RE Manager",
+        lambda: in_adapter("python", "-c", QUEUES).stdout.strip() in {"idle", "executing_queue"},
+        timeout_s=180,
+    )
+
+    for name, selection in [
+        ("no run selected", ("", "")),
+        ("MOUSE run selected", (run, "baseline")),
+        ("generic run selected", (generic, "primary")),
+    ]:
+        results = panel_queries(*selection)
+        errors = [f"{title}: {error}" for title, _, error in results if error]
+        detail = "; ".join(errors) or f"{len(results)} queries"
+        check(f"timeline dashboard queries, {name}", not errors, detail)
+        rows: dict[str, int] = {}
+        for title, n, _ in results:  # a panel may have several queries (two y axes)
+            rows[title] = rows.get(title, 0) + n
+        if name == "no run selected":
+            clips = rows.get("Timeline", 0)
+            check("timeline frame has clips", clips > 0, f"{clips} clips")
+            check("data status has a row", rows.get("Data status", 0) > 0)
+        if name == "generic run selected":
+            series = rows.get("Run time series", 0)
+            check("generic run has a time series", series > 0, f"{series} points")
 
     if failures:
         sys.exit(f"{len(failures)} smoke check(s) failed: {', '.join(failures)}")

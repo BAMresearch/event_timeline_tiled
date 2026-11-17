@@ -43,6 +43,7 @@ services:
       ETT_TILED_URL: ${ETT_TILED_URL:-http://tiled:8000}
       ETT_TILED_API_KEY_FILE: /secrets/adapter.key
       ETT_CATALOG_ROOTS: ${ETT_CATALOG_ROOTS:-}
+      ETT_QUEUES: ${ETT_QUEUES:-}
     volumes:
       - ${ETT_SECRETS:-adapter-key}:/secrets:ro
     depends_on:
@@ -147,6 +148,46 @@ services:
     depends_on:
       demo-bootstrap:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  # A real RE Manager with simulated devices, for the queue-status panel.
+  redis:
+    profiles: [demo]
+    image: redis:7.4@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 30
+
+  re-manager:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: demo-tools
+    command: ["start-re-manager", "--startup-dir", "/etc/queue/startup",
+              "--existing-plans-devices", "/tmp/existing_plans_and_devices.yaml",
+              "--update-existing-plans-devices", "ENVIRONMENT_OPEN",
+              "--user-group-permissions", "/etc/queue/startup/user_group_permissions.yaml",
+              "--redis-addr", "redis:6379",
+              "--zmq-control-addr", "tcp://0.0.0.0:60615",
+              "--zmq-info-addr", "tcp://0.0.0.0:60625"]
+    volumes:
+      - ./queue/startup:/etc/queue/startup:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  demo-queue:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: demo-tools
+    command: ["ett-demo-queue", "--zmq-control-addr", "tcp://re-manager:60615"]
+    depends_on: [re-manager]
     restart: unless-stopped
 
 volumes:
