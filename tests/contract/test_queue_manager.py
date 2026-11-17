@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -79,10 +80,35 @@ def manager(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Any, str
             control_api.manager_stop(option="safe_off")
             process.wait(timeout=30)
         except Exception:
-            process.kill()
+            pass
+        # The RE Manager's own children (multiprocessing) can outlive it and
+        # spin; it runs in its own session, so stop the whole process group.
+        _stop_group(process.pid)
         control_api.close()
         redis.terminate()
         redis.wait(timeout=10)
+    assert not _group_alive(process.pid), "RE Manager processes left running"
+
+
+def _group_alive(pgid: int) -> bool:
+    """Whether any process of the group is still running (zombies do not count;
+    macOS refuses ``killpg(pgid, 0)`` with EPERM for a group of zombies)."""
+    ps = subprocess.run(["ps", "-A", "-o", "pgid=,stat="], capture_output=True, text=True)
+    rows = (line.split() for line in ps.stdout.splitlines())
+    return any(len(r) == 2 and r[0] == str(pgid) and not r[1].startswith("Z") for r in rows)
+
+
+def _stop_group(pgid: int) -> None:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        if not _group_alive(pgid):
+            return
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError, PermissionError:
+            return
+        deadline = time.monotonic() + 10
+        while _group_alive(pgid) and time.monotonic() < deadline:
+            time.sleep(0.1)
 
 
 def test_idle_running_and_unreachable(
