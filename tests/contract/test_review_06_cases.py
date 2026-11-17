@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from event_timeline_tiled.adapter import app as adapter_app
 from event_timeline_tiled.adapter import create_app
+from event_timeline_tiled.adapter import results as adapter_results
 from event_timeline_tiled.layout import Layout
 from event_timeline_tiled.settings import Settings
 from event_timeline_tiled.testing.fixtures import FixtureWriter, ProcessingOutputs
@@ -117,7 +117,7 @@ def test_a_capped_related_search_names_no_latest(
     """Finding 3: with more processing runs than the cap, nothing is called
     the latest, and a measurement's curve is not followed."""
     server, manifest = catalog_server
-    monkeypatch.setattr(adapter_app, "RELATED_MAX_RUNS", 2)
+    monkeypatch.setattr(adapter_results, "RELATED_MAX_RUNS", 2)
     inside = manifest["runs"]["inside"]["uid"]
     with _client(server) as c:
         related = c.get(f"/runs/{inside}/related").json()

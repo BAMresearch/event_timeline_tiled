@@ -10,8 +10,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from event_timeline_tiled.adapter import app as adapter_app
 from event_timeline_tiled.adapter import create_app
+from event_timeline_tiled.adapter import metadata as adapter_metadata
 from event_timeline_tiled.layout import RunRecord
 from event_timeline_tiled.settings import Settings
 
@@ -108,37 +108,41 @@ def test_metadata_is_plain_json_and_bounded(monkeypatch: pytest.MonkeyPatch) -> 
         "deep": deep,
     }
     record = RunRecord("", "r", start, None)
-    rows, truncated = adapter_app.metadata_rows(record)
+    rows, truncated = adapter_metadata.metadata_rows(record)
     values = {r["key"]: r["value"] for r in rows}
     assert values["nan"] is None
     assert json.loads(values["list_of_dicts"]) == [{"v": None}, {"v": 1}]
     assert json.loads(values["nested_list"]) == [[1, 2], [3, None]]
     assert values["scalars"] == "a, 1, true, null, null"
-    assert len(values["long"]) == adapter_app.METADATA_MAX_CHARS and values["long"].endswith("…")
+    assert len(values["long"]) == adapter_metadata.METADATA_MAX_CHARS and values["long"].endswith(
+        "…"
+    )
     deep_key = next(k for k in values if k.startswith("deep."))
-    assert len(deep_key.split(".")) == adapter_app.METADATA_MAX_DEPTH
+    assert len(deep_key.split(".")) == adapter_metadata.METADATA_MAX_DEPTH
     assert isinstance(values[deep_key], str) and json.loads(values[deep_key])
     assert truncated  # the long value was cut
     json.dumps(rows, allow_nan=False)  # strict JSON
 
-    assert rows[-1] == {"document": "", "key": "(cut)", "value": adapter_app.METADATA_CUT}
+    assert rows[-1] == {"document": "", "key": "(cut)", "value": adapter_metadata.METADATA_CUT}
 
-    monkeypatch.setattr(adapter_app, "METADATA_MAX_ROWS", 3)
-    rows, truncated = adapter_app.metadata_rows(record)
+    monkeypatch.setattr(adapter_metadata, "METADATA_MAX_ROWS", 3)
+    rows, truncated = adapter_metadata.metadata_rows(record)
     assert len(rows) == 4 and truncated and rows[-1]["key"] == "(cut)"
 
 
 def test_metadata_cut_by_depth_alone_is_reported() -> None:
     """Review 06, finding 11: nesting cut to "…" sets the flag too."""
     deep: dict[str, Any] = {"v": 1}
-    for _ in range(2 * adapter_app.METADATA_MAX_DEPTH + 2):
+    for _ in range(2 * adapter_metadata.METADATA_MAX_DEPTH + 2):
         deep = {"d": deep}
-    rows, truncated = adapter_app.metadata_rows(
+    rows, truncated = adapter_metadata.metadata_rows(
         RunRecord("", "r", {"uid": "r", "deep": deep}, None)
     )
     assert truncated and any("…" in str(r["value"]) for r in rows[:-1])
     assert rows[-1]["key"] == "(cut)"
-    shallow, cut = adapter_app.metadata_rows(RunRecord("", "r", {"uid": "r", "a": {"b": 1}}, None))
+    shallow, cut = adapter_metadata.metadata_rows(
+        RunRecord("", "r", {"uid": "r", "a": {"b": 1}}, None)
+    )
     assert not cut and shallow[-1]["key"] != "(cut)"
 
 
