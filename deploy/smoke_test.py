@@ -220,7 +220,9 @@ def main() -> None:
         errors = [f"{title}: {error}" for title, _, error in results if error]
         detail = "; ".join(errors) or f"{len(results)} queries"
         check(f"timeline dashboard queries, {name}", not errors, detail)
-        rows = dict((title, n) for title, n, _ in results)
+        rows: dict[str, int] = {}
+        for title, n, _ in results:  # a panel may have several queries (two y axes)
+            rows[title] = rows.get(title, 0) + n
         if name == "no run selected":
             clips = rows.get("Timeline", 0)
             check("timeline frame has clips", clips > 0, f"{clips} clips")
