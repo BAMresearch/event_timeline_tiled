@@ -180,3 +180,17 @@ def test_closed_run_without_stop_time_is_not_drawn_as_running() -> None:
     broken = RunRecord("", "b", {"uid": "b", "time": 100.0}, {"exit_status": "success"})
     [row] = frame([clip(broken, observed_at=5000)], 0, 10_000)
     assert row["clip_to_ms"] == 100_000 and row["state"] == "success"
+
+
+def test_few_lanes_are_padded_with_empty_lanes_below() -> None:
+    clips = [clip(run("a", 100, 200)), clip(run("b", 150, 250))]  # one lane, two sub-lanes
+    real = frame(clips, 0, 1000)
+    padded = frame(clips, 0, 1000, min_lanes=4)
+    assert padded[: len(real)] == real
+    empty = padded[len(real) :]
+    lanes = [r["lane"] for r in empty]
+    assert len(lanes) == 2 and len(set(lanes)) == 2
+    assert all(name.strip() == "" and name not in {r["lane"] for r in real} for name in lanes)
+    assert all(r["start"] == r["stop"] == 0 and r["state"] is None for r in empty)
+    assert set(empty[0]) == set(real[0])  # the same columns, for Grafana
+    assert frame(clips, 0, 1000, min_lanes=2) == real == frame(clips, 0, 1000, min_lanes=0)

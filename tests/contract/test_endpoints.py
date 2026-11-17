@@ -319,6 +319,48 @@ def test_electrochemistry_run(api: tuple[TestClient, dict[str, Any]]) -> None:
         assert len(part["rows"]) == 5
 
 
+def test_trend_over_runs_like_the_selected_one(api: tuple[TestClient, dict[str, Any]]) -> None:
+    """Same lane, role and plan_name, one series per field, a gap between runs."""
+    client, manifest = api
+    runs = manifest["runs"]
+    uid = runs["electrochemistry"]["uid"]
+    window = _window(manifest)
+    body = client.get("/selection/trend", params={"uid": uid, **window, "axis": 1}).json()
+    assert body["runs"]["like"] == body["runs"]["plotted"] == 2  # not the "calibrate" run
+    assert (body["fields"], body["plan_name"]) == (["voltage_v"], "run_sequence")
+    data = [r for r in body["rows"] if r["value"] is not None]
+    gaps = [r for r in body["rows"] if r["value"] is None]
+    assert len(data) == 5 + 4 and len(gaps) == 1
+    assert {r["series"] for r in body["rows"]} == {"voltage_v [V]"}
+    times = [r["time"] for r in body["rows"]]
+    assert times == sorted(times)
+    first = [r["time"] for r in data][:5]
+    second = [r["time"] for r in data][5:]
+    assert max(first) < gaps[0]["time"] < min(second)
+    assert body["notice"].startswith("Hinted fields of readout over 2 run_sequence runs in range")
+    assert body == client.get(f"/runs/{uid}/trend", params={**window, "axis": 1}).json()
+    right = client.get("/selection/trend", params={"uid": uid, **window, "axis": 2}).json()
+    assert right["fields"] == ["current_a"]
+    # A run of another plan is a trend of its own; a small budget still keeps the last event.
+    other = runs["electrochemistry_other_plan"]["uid"]
+    alone = client.get("/selection/trend", params={"uid": other, **window}).json()
+    assert alone["runs"]["like"] == 1 and alone["fields"] == ["voltage_v", "current_a"]
+    small = client.get("/selection/trend", params={"uid": uid, **window, "max_points": 10}).json()
+    assert len(small["rows"]) <= 10 and small["rows"][-1]["time"] == data[-1]["time"]
+    # The window decides which runs: only the first run's time.
+    start = client.get(f"/runs/{uid}").json()["run"]
+    narrow = {"from": start["start"], "to": start["stop"] + 1}
+    assert client.get(f"/runs/{uid}/trend", params=narrow).json()["runs"]["like"] == 1
+    # No time series view (a MOUSE measurement), nothing selected, a run Tiled lacks.
+    mouse = client.get("/selection/trend", params={"uid": runs["inside"]["uid"], **window})
+    assert mouse.json()["notice"] == "this run has no timeseries view"
+    none = client.get("/selection/trend", params={"uid": "", **window}).json()
+    assert none["rows"] == [] and none["notice"].startswith("Select a run")
+    gone = client.get("/selection/trend", params={"uid": "no-such-run", **window}).json()
+    assert gone["notice"].startswith("The selected run is not in Tiled")
+    assert client.get("/selection/trend", params={"uid": uid}).status_code == 422
+
+
 def test_open_run_before_its_first_batch(api: tuple[TestClient, dict[str, Any]]) -> None:
     """TiledWriter writes event rows in batches: a running run's streams exist
     before their tables do. That is "no events yet", not an error."""

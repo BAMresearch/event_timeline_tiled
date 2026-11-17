@@ -16,6 +16,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
@@ -29,6 +30,7 @@ from ..run_state import Status, role_of, status_of
 from ..settings import Settings
 from ..tiled_http import HealthStatus, SourceError, TiledReader
 from ..timeline import SourceFetch, Timeline, WindowResult
+from ..trend import Piece, trend_rows
 from ..views import TABLE_ROW_LIMIT, ResolvedView, ViewKind, label, resolve
 
 MAX_WINDOW_S = 400 * 86400
@@ -53,6 +55,12 @@ NO_SELECTION = "Select a run on the timeline or in Runs in range"
 # A selection from a bookmark, a shared link or another Tiled: a message, not an error.
 NOT_FOUND = "The selected run is not in Tiled (under the configured roots): select another"
 NOT_WRITTEN = " (none in Tiled yet)"
+TREND_MAX_RUNS = 200
+"""Most runs in one trend: the latest ones in the window."""
+TREND_CACHE_VALUES = 2_000_000
+"""Values (times included) of finished runs kept in memory for trends."""
+TREND_WORKERS = 4
+"""Runs read at the same time for a trend."""
 
 
 def _window(t_from: float, t_to: float) -> None:
@@ -226,6 +234,10 @@ def create_app(
         OrderedDict()
     )
     data_lock = threading.Lock()
+    # Finished runs never change: their trend pieces are kept until evicted.
+    trend_cache: OrderedDict[tuple[str, ...], tuple[Piece, bool]] = OrderedDict()
+    trend_size = [0]
+    trend_stripes = [threading.Lock() for _ in range(64)]
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -313,12 +325,14 @@ def create_app(
 
     @app.get("/clips/frame")
     def clips_frame(
-        t_from: Annotated[float, Query(alias="from")], t_to: Annotated[float, Query(alias="to")]
+        t_from: Annotated[float, Query(alias="from")],
+        t_to: Annotated[float, Query(alias="to")],
+        min_lanes: Annotated[int, Query(ge=0, le=20)] = 0,
     ) -> list[dict[str, Any]]:
-        """The timeline frame of plan §8 (milliseconds), lanes final. Whether it
-        is complete is ``/clips/status``."""
+        """The timeline frame of plan §8 (milliseconds), lanes final, padded with
+        empty lanes up to ``min_lanes``. Whether it is complete is ``/clips/status``."""
         _window(t_from, t_to)
-        return frame(timeline.window(t_from, t_to).clips, t_from, t_to)
+        return frame(timeline.window(t_from, t_to).clips, t_from, t_to, min_lanes)
 
     @app.get("/clips/status")
     def clips_status(
@@ -656,6 +670,165 @@ def create_app(
             "notice": notice,
         }
 
+    # Trend: the selected run and the runs like it ----------------------------------------
+
+    def _trend_piece(
+        run: RunRecord, view: ResolvedView, fields: list[str]
+    ) -> tuple[Piece, bool] | str:
+        """This run's events of ``fields`` in ``view``'s stream, and whether
+        some fields were missing (their values are null); or why there are none:
+        ``"no view"`` or ``"unreadable"``. A finished run is read once: requests
+        for it at the same time (the trend panel's queries) wait for that read."""
+        if run.stop is None:
+            return _read_trend_piece(run, view, fields)
+        key = (run.root, run.key, view.name, *view.streams, *fields)
+        with trend_stripes[hash(key) % len(trend_stripes)]:
+            with data_lock:
+                if (hit := trend_cache.get(key)) is not None:
+                    trend_cache.move_to_end(key)
+                    return hit
+            result = _read_trend_piece(run, view, fields)
+            if isinstance(result, str):
+                return result
+            with data_lock:
+                trend_cache[key] = result
+                trend_size[0] += len(result[0].time) * (len(fields) + 1)
+                while trend_size[0] > TREND_CACHE_VALUES and len(trend_cache) > 1:
+                    _, (old, _) = trend_cache.popitem(last=False)
+                    trend_size[0] -= len(old.time) * (len(old.values) + 1)
+            return result
+
+    def _read_trend_piece(
+        run: RunRecord, view: ResolvedView, fields: list[str]
+    ) -> tuple[Piece, bool] | str:
+        [stream] = view.streams
+        try:
+            mine = next(
+                (v for v in resolve(run, role_of(run.start), layout.streams(run))
+                 if v.name == view.name and v.available and v.kind is ViewKind.TIMESERIES
+                 and v.streams == view.streams),
+                None,
+            )  # fmt: skip
+            if mine is None:
+                return "no view"
+            # A field in other units than the selected run's is left out, not mixed in.
+            present = [f for f in fields if f in mine.fields
+                       and mine.units.get(f) == view.units.get(f)]  # fmt: skip
+            data = layout.event_columns(run, stream, present)
+        except SourceError:
+            return "unreadable"
+        n = len(data["time"])
+        values = {f: data[f] if f in present else [None] * n for f in fields}
+        return Piece(run.key, data["time"], values), len(present) < len(fields)
+
+    def trend_of(
+        run: RunRecord, t_from: float, t_to: float, max_points: int, axis: int | None
+    ) -> dict[str, Any]:
+        """The selected run's time series view over every run like it in the
+        window: same lane, role and ``plan_name``, and the same view of the same
+        stream. One series per field; a gap between runs."""
+        view = next(
+            (v for v in views_of(run) if v.available and v.kind is ViewKind.TIMESERIES), None
+        )
+        if view is None:
+            reason = "this run has no timeseries view"
+            return {"view": None, "kind": ViewKind.TIMESERIES.value, "rows": [],
+                    "truncated": False, "reason": reason, "notice": reason}  # fmt: skip
+        [stream] = view.streams
+        wanted = list(view.fields)
+        left = (
+            [f for f in wanted if view.units.get(f) == view.units.get(wanted[0])] if wanted else []
+        )
+        if axis is not None:
+            wanted = left if axis == 1 else [f for f in wanted if f not in left]
+        fields = wanted[: max_points // 3]
+        result = timeline.window(t_from, t_to)
+        key, role, plan = lane_key(run), role_of(run.start), run.start.get("plan_name")
+        like = sorted(
+            (c for c in result.clips
+             if c.lane_key == key and c.role is role
+             and result.records[(c.root, c.uid)].start.get("plan_name") == plan),
+            key=lambda c: (c.start, c.uid),
+        )  # fmt: skip
+        runs_cut = len(like) > TREND_MAX_RUNS
+        chosen = like[-TREND_MAX_RUNS:]
+        records = [result.records[(c.root, c.uid)] for c in chosen]
+        if fields and records:
+            with ThreadPoolExecutor(TREND_WORKERS) as pool:
+                outcomes = list(pool.map(lambda r: _trend_piece(r, view, fields), records))
+            # Retried one at a time: some Tiled table stores (DuckDB in Tiled
+            # 0.2.21) fail reads made at the same time.
+            outcomes = [
+                _trend_piece(r, view, fields) if o == "unreadable" else o
+                for r, o in zip(records, outcomes, strict=True)
+            ]
+        else:
+            outcomes = []
+        pieces = [o[0] for o in outcomes if not isinstance(o, str)]
+        incomplete = sum(1 for o in outcomes if not isinstance(o, str) and o[1])
+        no_view = outcomes.count("no view")
+        unreadable = outcomes.count("unreadable")
+        series = {f: f"{f} [{view.units[f]}]" if f in view.units else f for f in fields}
+        trend = trend_rows(pieces, fields, series, max_points, _json_value)
+        fields_cut = len(fields) < len(wanted)
+        what = plan if isinstance(plan, str) else "unnamed"
+        notice = (f"{view.title} of {stream} over {trend.runs} {what} runs in range: "
+                  f"{trend.kept} of {trend.events} events")  # fmt: skip
+        if runs_cut:
+            notice += f", the latest {TREND_MAX_RUNS} of {len(like)} runs only"
+        if result.truncated:
+            notice += ", not every run in range was read (ETT_MAX_RUNS)"
+        if no_view:
+            notice += f", {no_view} without this view"
+        if unreadable:
+            notice += f", {unreadable} could not be read"
+        if incomplete:
+            notice += f", {incomplete} lacking some fields"
+        if fields_cut:
+            notice += f", first {len(fields)} of {len(wanted)} fields"
+        return {
+            "view": view.name,
+            "kind": view.kind.value,
+            "stream": stream,
+            "axis": axis,
+            "fields": fields,
+            "units": dict(view.units),
+            "plan_name": plan,
+            "rows": trend.rows,
+            "truncated": fields_cut or runs_cut or result.truncated,
+            "runs": {
+                "like": len(like),
+                "read": len(records),
+                "plotted": trend.runs,
+                "without_view": no_view,
+                "unreadable": unreadable,
+                "lacking_fields": incomplete,
+                "max_runs": TREND_MAX_RUNS,
+            },
+            "decimation": {
+                "method": "every k-th event over all runs, last event always kept",
+                "every": trend.every,
+                "source_rows": trend.events,
+                "events": trend.kept,
+                "returned": len(trend.rows),
+                "max_points": max_points,
+            },
+            "non_finite": trend.non_finite,
+            "notice": notice,
+        }
+
+    @app.get("/runs/{uid}/trend")
+    def run_trend(
+        uid: UID,
+        t_from: Annotated[float, Query(alias="from")],
+        t_to: Annotated[float, Query(alias="to")],
+        max_points: MAX_POINTS = 2000,
+        axis: AXIS = None,
+    ) -> dict[str, Any]:
+        """The run's time series view over the runs like it in ``[from, to)``."""
+        _window(t_from, t_to)
+        return trend_of(find(uid), t_from, t_to, max_points, axis)
+
     # The dashboard's selection -----------------------------------------------------------
     # The same reads as /runs/{uid}/..., with the run (and stream) as query
     # parameters that may be empty: nothing selected is a normal state of the
@@ -709,6 +882,21 @@ def create_app(
             notice = NOT_FOUND if uid else NO_SELECTION
             return {"view": None, "rows": [], "truncated": False, "notice": notice}
         return data_of(run, view, kind, max_points, axis)
+
+    @app.get("/selection/trend")
+    def selected_trend(
+        t_from: Annotated[float, Query(alias="from")],
+        t_to: Annotated[float, Query(alias="to")],
+        uid: SELECTED = "",
+        max_points: MAX_POINTS = 2000,
+        axis: AXIS = None,
+    ) -> dict[str, Any]:
+        _window(t_from, t_to)
+        run = selection(uid)
+        if run is None:
+            notice = NOT_FOUND if uid else NO_SELECTION
+            return {"view": None, "rows": [], "truncated": False, "notice": notice}
+        return trend_of(run, t_from, t_to, max_points, axis)
 
     return app
 

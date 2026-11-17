@@ -25,6 +25,7 @@ ENDPOINTS = {
     "/selection/streams",
     "/selection/fields",
     "/selection/data",
+    "/selection/trend",
 }
 
 
@@ -125,13 +126,15 @@ def test_time_series_puts_other_units_on_a_second_axis() -> None:
     """Axis 1: fields in the first field's units; axis 2, on the right: the rest.
     Generic: no field names or units in the dashboard."""
     timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
-    [panel] = [p for p in _panels(timeline) if p["type"] == "timeseries"]
-    axes = {t["refId"]: t["url"].rsplit("axis=", 1)[1] for t in panel["targets"]}
-    assert axes == {"A": "1", "B": "2"}
-    [right] = panel["fieldConfig"]["overrides"]
-    assert right["matcher"] == {"id": "byFrameRefID", "options": "B"}
-    assert right["properties"] == [{"id": "custom.axisPlacement", "value": "right"}]
-    assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.labels.series}"
+    panels = [p for p in _panels(timeline) if p["type"] == "timeseries"]
+    assert {p["title"].split(":")[0] for p in panels} == {"Run time series", "Trend"}
+    for panel in panels:
+        axes = {t["refId"]: t["url"].rsplit("axis=", 1)[1] for t in panel["targets"]}
+        assert axes == {"A": "1", "B": "2"}
+        [right] = panel["fieldConfig"]["overrides"]
+        assert right["matcher"] == {"id": "byFrameRefID", "options": "B"}
+        assert right["properties"] == [{"id": "custom.axisPlacement", "value": "right"}]
+        assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.labels.series}"
 
 
 # Columns the adapter may return as null (docs/technical/endpoints.md), per table.
@@ -140,6 +143,7 @@ NULLABLE = {
     "Streams": {"last_event"},
     "Run data (default view)": {"units", "value", "time"},
     "Fields of ${stream}": {"units", "shape", "dtype"},
+    "Run metadata": {"value"},
 }
 
 
@@ -156,8 +160,9 @@ def test_null_cells_never_show_the_empty_panel_text() -> None:
             if {"id": "noValue", "value": "\u2013"} in o["properties"]
         }
         assert nullable <= overrides, title
-    [notice] = [p for p in _panels(timeline) if p["type"] == "stat" and not p["title"]]
-    assert notice["fieldConfig"]["defaults"]["noValue"] == "\u2013"
+    notices = [p for p in _panels(timeline) if p["type"] == "stat" and not p["title"]]
+    assert len(notices) == 2  # selected run's data, trend
+    assert all(n["fieldConfig"]["defaults"]["noValue"] == "\u2013" for n in notices)
 
 
 @pytest.mark.parametrize("path", DASHBOARDS, ids=lambda p: p.name)

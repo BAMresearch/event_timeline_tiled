@@ -208,7 +208,9 @@ def _zoom(start: float, end: float) -> tuple[int, int]:
     return round((start - pad) * 1000), round((end + pad) * 1000)
 
 
-def frame(clips: Sequence[Clip], t_from: float, t_to: float) -> list[dict[str, Any]]:
+def frame(
+    clips: Sequence[Clip], t_from: float, t_to: float, min_lanes: int = 0
+) -> list[dict[str, Any]]:
     """The timeline frame: one row per clip, in lane order, with ``lane`` final.
 
     - ``start``/``stop``: display extent in **milliseconds** (Grafana time
@@ -226,6 +228,11 @@ def frame(clips: Sequence[Clip], t_from: float, t_to: float) -> list[dict[str, A
     - ``clip_from_ms``/``clip_to_ms``: the true extent (open runs: up to
       ``observed_at``); ``zoom_from_ms``/``zoom_to_ms``: that extent padded,
       for "Zoom to run".
+    - ``min_lanes``: with fewer lanes (sub-lanes included), empty lanes are
+      added below, so that a panel of fixed height does not draw one lane
+      as one huge bar. An empty lane is one row with an invisible, unique
+      name (non-breaking spaces), ``start`` = ``stop`` = ``from`` and every
+      other field null.
     """
     names = lane_names([c.lane_key for c in clips])
     min_width = max(t_to - t_from, 0.0) * MIN_DISPLAY_FRACTION
@@ -292,4 +299,19 @@ def frame(clips: Sequence[Clip], t_from: float, t_to: float) -> list[dict[str, A
                 },
             )
         )
-    return [row for _, row in sorted(rows, key=lambda r: r[0])]
+    out = [row for _, row in sorted(rows, key=lambda r: r[0])]
+    lanes = {row["lane"] for row in out}
+    blank = 0
+    for _ in range(min_lanes - len(lanes)):
+        blank += 1
+        while "\u00a0" * blank in lanes:  # never a real lane's name
+            blank += 1
+        out.append(_empty_lane("\u00a0" * blank, round(t_from * 1000)))
+    return out
+
+
+def _empty_lane(name: str, at_ms: int) -> dict[str, Any]:
+    return {"lane": name, "start": at_ms, "stop": at_ms, "state": None, "status": None,
+            "uid": None, "label": None, "clip_from_ms": None, "clip_to_ms": None,
+            "possibly_stalled": None, "stale": None, "zoom_from_ms": None, "zoom_to_ms": None,
+            "activity_error": None}  # fmt: skip

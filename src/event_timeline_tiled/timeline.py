@@ -15,7 +15,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from attrs import define, field, frozen
 
@@ -74,6 +74,9 @@ class WindowResult:
     unplaceable: list[str]
     """Keys of runs found without a usable start time (reported, not drawn)."""
     fetches: list[SourceFetch]
+    records: Mapping[tuple[str, str], RunRecord] = field(factory=dict)
+    """The run record of each clip, by ``(root, uid)``: what the search
+    returned, so that callers need not fetch runs one by one."""
 
 
 @frozen
@@ -106,6 +109,7 @@ class Timeline:
         now = self.clock()
         horizon = self.settings.open_run_horizon_days * 86400
         clips: list[Clip] = []
+        records: dict[tuple[str, str], RunRecord] = {}
         unplaceable: list[str] = []
         fetches: list[SourceFetch] = []
         for root in self.roots:
@@ -139,6 +143,7 @@ class Timeline:
                     unplaceable.append(run.key)
                     continue
                 clips.append(clip)
+                records[(clip.root, clip.uid)] = run
                 if source_error is None and clip.activity.error is not None:
                     activity_errors.append(clip.activity.error)
             fetches.append(
@@ -159,6 +164,7 @@ class Timeline:
             truncated=any(f.truncated for f in fetches),
             unplaceable=unplaceable,
             fetches=fetches,
+            records=records,
         )
 
     def _clip(

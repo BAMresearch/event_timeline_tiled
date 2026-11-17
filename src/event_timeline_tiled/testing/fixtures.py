@@ -566,6 +566,7 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
                 "station": "simulator",
                 "measurement_id": "example-rest",
                 "sample_id": "S-echem",
+                "plan_name": "run_sequence",
             },
             t0 + 1400,
             t0 + 1450,
@@ -573,6 +574,27 @@ def window_scenario(fw: FixtureWriter, t0: float) -> dict[str, Any]:
         "expect_in_window": True,
         "expect_status": "success",
     }
+    # Runs like it (same lane and plan) and one unlike it: a trend over runs.
+    for case, plan, start, stop in (
+        ("electrochemistry_next", "run_sequence", 1460, 1480),
+        ("electrochemistry_other_plan", "calibrate", 1485, 1495),
+    ):
+        runs[case] = {
+            "uid": fw.electrochemistry_run(
+                {
+                    "instrument": "electrochemistry-k2460",
+                    "station": "simulator",
+                    "measurement_id": f"example-{case}",
+                    "sample_id": "S-echem",
+                    "plan_name": plan,
+                },
+                t0 + start,
+                t0 + stop,
+                n_events=4,
+            ),
+            "expect_in_window": True,
+            "expect_status": "success",
+        }
     # Running, its events still in the writer's batch: streams without tables.
     runs["open_unflushed"] = {
         "uid": fw.unflushed_run(

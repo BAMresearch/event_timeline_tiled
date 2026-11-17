@@ -105,7 +105,7 @@ truncated), `stale` (a root failed now; its runs are shown as last seen),
 time), else `complete`. `issues` has one row per problem, worst first, or
 one `complete` row. `sources` is as in `/clips`.
 
-## `GET /clips/frame?from&to`
+## `GET /clips/frame?from&to[&min_lanes]`
 
 The State timeline frame (plan §8), a list of rows in lane order:
 
@@ -118,6 +118,12 @@ The State timeline frame (plan §8), a list of rows in lane order:
 | `uid`, `label` | hidden helpers for links and tooltips |
 | `clip_from_ms`, `clip_to_ms` | true extent (open runs: up to `observed_at`) |
 | `zoom_from_ms`, `zoom_to_ms` | the true extent with 5 % (at least 5 s) on either side, for "Zoom to run": never an empty range |
+
+With `min_lanes` (0–20, default 0) and fewer lanes than that (sub-lanes
+included), empty lanes are added after the real ones: one row each, `lane`
+one or more non-breaking spaces (invisible, unique, never a real lane's
+name), `start` = `stop` = `from` in ms, every other field `null`. A panel of
+fixed height then never draws a single lane as one huge bar.
 
 The frame says nothing about completeness; that is `/clips/status`.
 
@@ -213,6 +219,45 @@ Rows of one view (default view if `view` is omitted). Every response has a
 Non-finite numbers are returned as `null`. A view's rows are reused for 5
 seconds (the dashboard reads the default view twice per refresh).
 
+## `GET /runs/{uid}/trend?from&to&max_points&axis`
+
+The run's time series view (the first available `timeseries` view, as
+`/runs/{uid}/data?kind=timeseries`) over **the runs like it** in
+`[from, to)` (epoch seconds, as `/clips`): runs on the same lane, with the
+same role and the same start-document `plan_name` (both missing counts as
+the same), whose views include the same view of the same stream. The run
+itself is one of them if it is in the window. One series per field, all
+runs joined; between two runs, one row per field with `value: null`
+halfway between them, so the line breaks there.
+
+`{"view", "kind", "stream", "axis", "fields", "units", "plan_name",
+"rows": [{"time": <ms>, "field", "series", "value"}], "truncated",
+"runs": {"like", "read", "plotted", "without_view", "unreadable",
+"lacking_fields", "max_runs"}, "decimation": {...}, "non_finite", "notice"}`
+
+- `fields`, `units`, `series` and `axis` are those of the selected run's
+  view, as in `/runs/{uid}/data`. A field missing from another run, or in
+  other units there, is `null` for that run (never mixed in);
+  `lacking_fields` counts such runs.
+- At most the latest 200 runs like it (`max_runs`) are read; `like` counts
+  all of them. A run whose streams or table cannot be read is left out and
+  counted in `unreadable`; one without the view, in `without_view`.
+- `max_points` (10–20000, default 2000) bounds the rows returned, gap rows
+  included: every k-th event over all runs together, always the last. At
+  most `max_points // 3` fields.
+- `truncated` is true if runs were left out by `max_runs` or by the
+  window's `ETT_MAX_RUNS`, or fields by `max_points`. The `notice` says
+  which, and how many runs were left out for any reason.
+- No `timeseries` view: no rows, `view: null` and a `reason`.
+- Finished runs are read once and kept (up to two million values over all
+  runs, oldest use evicted first); open runs are read on every request.
+  Runs are read four at a time; a run that fails is retried once on its
+  own (some table stores, such as DuckDB in Tiled 0.2.21, fail reads made
+  at the same time).
+
+Runs that overlap in time (several sub-lanes) are joined in time order, so
+their lines interleave.
+
 ## `GET /selection/...`
 
 What the Timeline dashboard reads for the selected run. The same reads as
@@ -228,8 +273,9 @@ link, a run from another server): it gets a message, not `404`.
 | `/selection/streams?uid` | as `/runs/{uid}/streams` | `[]` |
 | `/selection/fields?uid&stream` | as `/runs/{uid}/streams/{stream}/fields` | `[]` (also with `stream=` empty) |
 | `/selection/data?uid&view|kind&max_points&axis` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
+| `/selection/trend?uid&from&to&max_points&axis` | as `/runs/{uid}/trend` | no rows, `notice` "Select a run …" |
 
 With a `uid` that is not found: `/selection/run` gives `{"selected": true,
 "found": false, "summary": [{"key": "run", "value": "The selected run is not
-in Tiled …"}], "metadata": [], "metadata_truncated": false}`, `/selection/data` no rows with that `notice`, and
+in Tiled …"}], "metadata": [], "metadata_truncated": false}`, `/selection/data` and `/selection/trend` no rows with that `notice`, and
 `/selection/streams` and `/selection/fields` `[]`.

@@ -1161,7 +1161,7 @@
     "x": 0,
     "y": 18,
     "w": 24,
-    "h": 12
+    "h": 10
    },
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
@@ -1178,7 +1178,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/clips/frame?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}",
+     "url": "http://adapter:8000/clips/frame?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&min_lanes=4",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1522,11 +1522,203 @@
    }
   },
   {
+   "type": "stat",
+   "title": "",
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 24,
+    "h": 2
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "table",
+     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&max_points=2000&axis=1",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "",
+     "columns": [
+      {
+       "selector": "notice",
+       "text": "notice",
+       "type": "string"
+      }
+     ]
+    }
+   ],
+   "transparent": true,
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "/^notice$/",
+     "values": false
+    },
+    "colorMode": "none",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "auto",
+    "text": {
+     "valueSize": 14
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "\u2013"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Trend: the selected run and the runs like it in range",
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 24,
+    "h": 8
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "timeseries",
+     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&max_points=2000&axis=1",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "rows",
+     "columns": [
+      {
+       "selector": "time",
+       "text": "time",
+       "type": "timestamp_epoch"
+      },
+      {
+       "selector": "field",
+       "text": "field",
+       "type": "string"
+      },
+      {
+       "selector": "series",
+       "text": "series",
+       "type": "string"
+      },
+      {
+       "selector": "value",
+       "text": "value",
+       "type": "number"
+      }
+     ]
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "timeseries",
+     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&max_points=2000&axis=2",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "rows",
+     "columns": [
+      {
+       "selector": "time",
+       "text": "time",
+       "type": "timestamp_epoch"
+      },
+      {
+       "selector": "field",
+       "text": "field",
+       "type": "string"
+      },
+      {
+       "selector": "series",
+       "text": "series",
+       "type": "string"
+      },
+      {
+       "selector": "value",
+       "text": "value",
+       "type": "number"
+      }
+     ]
+    }
+   ],
+   "options": {
+    "legend": {
+     "showLegend": true,
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "displayName": "${__field.labels.series}",
+     "noValue": "nothing to plot (see the line above)",
+     "custom": {
+      "drawStyle": "line",
+      "showPoints": "auto"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byFrameRefID",
+       "options": "B"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "The selected run's time series view over every run in range on the same lane with the same plan name and the same view: one line per field, broken between runs."
+  },
+  {
    "type": "table",
    "title": "Run metadata",
    "gridPos": {
     "x": 0,
-    "y": 30,
+    "y": 38,
     "w": 24,
     "h": 10
    },
@@ -1637,7 +1829,7 @@
    "collapsed": true,
    "gridPos": {
     "x": 0,
-    "y": 40,
+    "y": 48,
     "w": 24,
     "h": 1
    },
@@ -1647,7 +1839,7 @@
      "title": "Fields of ${stream}",
      "gridPos": {
       "x": 0,
-      "y": 41,
+      "y": 49,
       "w": 24,
       "h": 8
      },

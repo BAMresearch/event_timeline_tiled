@@ -50,3 +50,9 @@ After the first look at the lab Tiled (2026-11-17):
   the same as `/runs/{uid}` (empty when nothing is selected or the run is
   not found), for the dashboard's *Run metadata* panel. Additive: existing
   fields are unchanged.
+- New endpoints `/runs/{uid}/trend` and `/selection/trend`: the run's time
+  series over the runs like it in a window. Additive.
+- `/clips/frame` has the new parameter `min_lanes` (default 0: unchanged).
+  With it, the frame may end with empty lanes whose fields are `null`
+  except `lane`, `start` and `stop`; consumers that pass it must not expect
+  a `uid` on every row.
