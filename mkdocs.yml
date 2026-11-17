@@ -21,6 +21,7 @@ nav:
       - "Upstream: electrochemistry-bluesky": design/upstream/brief-electrochemistry-bluesky.md
       - "Upstream: electrochemistry-bluesky reply": design/upstream/response-electrochemistry-bluesky.md
       - "Upstream: mouse_bluesky": design/upstream/brief-mouse-bluesky.md
+      - "Upstream: mouse_bluesky queue over HTTP": design/upstream/brief-mouse-bluesky-queue-http.md
       - Reviews:
           - "01 Architecture: brief": design/reviews/brief-01-architecture.md
           - "01 Architecture: response": design/reviews/response-01-architecture.md
