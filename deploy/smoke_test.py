@@ -156,7 +156,7 @@ def panel_queries(run: str, stream: str) -> list[tuple[str, int, str]]:
             if status != 200:
                 out.append((panel["title"], 0, f"HTTP {status}"))
                 continue
-            result = json.loads(body)["results"]["A"]
+            result = json.loads(body)["results"][target.get("refId", "A")]
             frames = result.get("frames", [])
             rows = sum(len(f["data"]["values"][0]) for f in frames if f["data"]["values"])
             out.append((panel["title"] or "notice", rows, (result.get("error") or "")[:120]))
