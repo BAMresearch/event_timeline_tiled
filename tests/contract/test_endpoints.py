@@ -185,9 +185,15 @@ def test_status_filter_and_reasons(api: tuple[TestClient, dict[str, Any]]) -> No
 
 def test_data_by_kind(api: tuple[TestClient, dict[str, Any]]) -> None:
     client, manifest = api
-    mouse, generic = manifest["runs"]["inside"]["uid"], manifest["runs"]["generic_inside"]["uid"]
-    none = client.get(f"/runs/{mouse}/data", params={"kind": "timeseries"}).json()
-    assert (none["view"], none["rows"]) == (None, [])
+    runs = manifest["runs"]
+    mouse, generic = runs["inside"]["uid"], runs["generic_inside"]["uid"]
+    # A processing run's outputs are arrays: no time series.
+    none = client.get(f"/runs/{runs['proc_inside_ok']['uid']}/data", params={"kind": "timeseries"})
+    assert (none.json()["view"], none.json()["rows"]) == (None, [])
+    # MOUSE measurements: the view table's time series of the detector stream.
+    detector = client.get(f"/runs/{mouse}/data", params={"kind": "timeseries"}).json()
+    assert (detector["view"], detector["stream"]) == ("numeric", "mouse_eiger_measure")
+    assert {r["field"] for r in detector["rows"]} == {"roi", "stats"}
     series = client.get(f"/runs/{generic}/data", params={"kind": "timeseries"}).json()
     assert series["view"] == "numeric" and len(series["rows"]) == 5
     both = {"kind": "table", "view": "summary"}
@@ -351,9 +357,18 @@ def test_trend_over_runs_like_the_selected_one(api: tuple[TestClient, dict[str, 
     start = client.get(f"/runs/{uid}").json()["run"]
     narrow = {"from": start["start"], "to": start["stop"] + 1}
     assert client.get(f"/runs/{uid}/trend", params=narrow).json()["runs"]["like"] == 1
-    # No time series view (a MOUSE measurement), nothing selected, a run Tiled lacks.
+    # MOUSE measurements: the view table's time series of the detector stream
+    # (the fixture hints nothing there, so all its numeric scalars).
     mouse = client.get("/selection/trend", params={"uid": runs["inside"]["uid"], **window})
-    assert mouse.json()["notice"] == "this run has no timeseries view"
+    body = mouse.json()
+    assert (body["view"], body["stream"]) == ("numeric", "mouse_eiger_measure")
+    assert body["fields"] == ["roi", "stats"] and body["runs"]["unreadable"] == 0
+    assert body["runs"]["plotted"] >= 2
+    # No time series view (a processing run), nothing selected, a run Tiled lacks.
+    processing = {"uid": runs["proc_inside_ok"]["uid"], **window}
+    assert client.get("/selection/trend", params=processing).json()["notice"] == (
+        "this run has no timeseries view"
+    )
     none = client.get("/selection/trend", params={"uid": "", **window}).json()
     assert none["rows"] == [] and none["notice"].startswith("Select a run")
     gone = client.get("/selection/trend", params={"uid": "no-such-run", **window}).json()

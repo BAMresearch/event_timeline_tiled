@@ -183,7 +183,10 @@ stream that has it.
 
 Kinds: `table`, `timeseries`, `summary`. View names in version 1:
 `readings`, `baseline` (MOUSE), `hinted`, `numeric`, `events`, `no_data`
-(fallback), `summary` (all runs).
+(fallback), `summary` (all runs). `hinted` and `numeric` always mean a time
+series of one stream's hinted numeric scalars, or all its numeric scalars:
+the fallback's stream, or the stream an instrument's entry names (MOUSE
+measurements: `mouse_eiger_measure`, after the default `readings`).
 
 ## `GET /runs/{uid}/data?view|kind&max_points&axis`
 
