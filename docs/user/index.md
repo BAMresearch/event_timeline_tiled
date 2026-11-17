@@ -10,42 +10,44 @@ Sign in to Grafana with your Viewer account and open **Timeline**.
 
 ## Timeline
 
-Laid out like a video editor:
+From top to bottom, in sections you can collapse by clicking their title
+(the next reload opens them all again):
 
-- **Bottom: the timeline.** One lane per instrument (and station), with
-  processing runs on their own lane below it. Each block is one run, from
-  its start to its stop. Overlapping runs on one lane are spread over
-  sub-lanes (`MOUSE /2`). Very short runs are drawn a little wider than they
-  are, so they stay visible; their real times are in the run details.
-- **Top left:** *Runs in range* (newest first), *Failed and aborted* with
-  the recorded reason, and for the selected run its details and streams.
-- **Top right:** the selected run's data in its default view (for MOUSE
-  measurements: the readings of `mouse_eiger_measure`, `snapshot` and
-  `baseline`; for electrochemistry runs: voltage and current), and a time
-  series when the run has one. Fields in other units than the first are
-  drawn against a second axis on the right; the legend gives each field's
-  units. The line above the
-  data says which view it is and whether rows were left out (a table shows
-  at most 2000 rows).
-- **Top:** *Queue*, per instrument: the RE Manager's state (`idle`,
-  `executing_queue`, `paused`, or `unreachable` when it does not answer),
-  the running plan, since when it runs, and the number of queued items;
-  and *Data status* (below).
-- **Below the timeline:** *Trend*, the selected run's time series together
-  with every run like it in the time range: the same lane, the same plan
-  (`plan_name`) and the same view. Each field is one line across those
-  runs, broken between runs, on the same time axis as the timeline, so you
-  can follow a value through a series of measurements. The line above it
-  says how many runs it covers, and which were left out (at most the
-  latest 200 runs). Runs without that view (configuration runs, for
+- **Top, always shown:** *Queue*, per instrument: the RE Manager's state
+  (`idle`, `executing_queue`, `paused`, or `unreachable` when it does not
+  answer), the running plan, since when it runs, and the number of queued
+  items; and *Data status* (below).
+- **Runs and the selected run.** On the left, *Runs in range* (newest
+  first), *Failed and aborted* with the recorded reason, and for the
+  selected run its details and streams. On the right, the selected run's
+  data in its default view (for MOUSE measurements: the readings of
+  `mouse_eiger_measure`, `snapshot` and `baseline`; for electrochemistry
+  runs: voltage and current), and a time series when the run has one.
+  Fields in other units than the first are drawn against a second axis on
+  the right; the legend gives each field's units. The line above the data
+  says which view it is and whether rows were left out (a table shows at
+  most 2000 rows).
+- **Timeline.** One lane per instrument (and station), with processing
+  runs on their own lane below it. Each block is one run, from its start to
+  its stop. Overlapping runs on one lane are spread over sub-lanes
+  (`MOUSE /2`). Very short runs are drawn a little wider than they are, so
+  they stay visible; their real times are in the run details. With few
+  lanes, the rest of the panel stays empty.
+- **Trend: runs like the selected one.** The selected run's time series
+  together with every run like it in the time range: the same lane, the
+  same plan (`plan_name`) and the same view. Each field is one line across
+  those runs, broken between runs, on the same time axis as the timeline,
+  so you can follow a value through a series of measurements. The line
+  above it says how many runs it covers, and which were left out (at most
+  the latest 200 runs). Runs without that view (configuration runs, for
   example) are not part of it.
-- **Below that:** *Run metadata*, everything the selected run's
-  start and stop documents record, one row per key (nested keys dotted, for
-  example `versions.bluesky`): sample and configuration identifiers, plan
+- **Run metadata.** Everything the selected run's start and stop documents
+  record, one row per key (nested keys dotted, for example
+  `versions.bluesky`): sample and configuration identifiers, plan
   parameters, the exit status and the event count per stream. Very long
   values end in `…` where they were cut.
-- **At the bottom, collapsed:** *Stream fields*. Click a stream in
-  *Streams*, then open this row to see its fields, types, shapes and units.
+- **Stream fields, collapsed.** Click a stream in *Streams*, then open
+  this section to see its fields, types, shapes and units.
 
 **Selecting a run:** click its block on the timeline and choose *Select run*
 (or *Zoom to run* to fit the time range to it), or click its label in a

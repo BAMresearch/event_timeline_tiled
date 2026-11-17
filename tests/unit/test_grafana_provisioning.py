@@ -170,3 +170,16 @@ def test_dashboard_has_no_secrets_or_instrument_tests(path: Path) -> None:
     text = path.read_text()
     assert not re.search(r"(?i)apikey|api_key|password|secret", text)
     assert not re.search(r"\bMOUSE\b|electrochemistry", text)
+
+
+def test_timeline_dashboard_is_in_collapsible_rows() -> None:
+    """Every panel below the top strip is in a row; only Stream fields starts
+    collapsed (its panel is queried only when opened)."""
+    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
+    panels = timeline["panels"]
+    rows = [p for p in panels if p["type"] == "row"]
+    assert [r["collapsed"] for r in rows] == [False] * (len(rows) - 1) + [True]
+    first_row = min(r["gridPos"]["y"] for r in rows)
+    above = [p["title"] for p in panels if p["gridPos"]["y"] < first_row]
+    assert set(above) == {"", "Queue", "Data status"}  # the help text has no title
+    assert all(not r["panels"] for r in rows[:-1]) and rows[-1]["panels"]
