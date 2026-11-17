@@ -121,9 +121,25 @@ def test_metadata_is_plain_json_and_bounded(monkeypatch: pytest.MonkeyPatch) -> 
     assert truncated  # the long value was cut
     json.dumps(rows, allow_nan=False)  # strict JSON
 
+    assert rows[-1] == {"document": "", "key": "(cut)", "value": adapter_app.METADATA_CUT}
+
     monkeypatch.setattr(adapter_app, "METADATA_MAX_ROWS", 3)
     rows, truncated = adapter_app.metadata_rows(record)
-    assert len(rows) == 3 and truncated
+    assert len(rows) == 4 and truncated and rows[-1]["key"] == "(cut)"
+
+
+def test_metadata_cut_by_depth_alone_is_reported() -> None:
+    """Review 06, finding 11: nesting cut to "…" sets the flag too."""
+    deep: dict[str, Any] = {"v": 1}
+    for _ in range(2 * adapter_app.METADATA_MAX_DEPTH + 2):
+        deep = {"d": deep}
+    rows, truncated = adapter_app.metadata_rows(
+        RunRecord("", "r", {"uid": "r", "deep": deep}, None)
+    )
+    assert truncated and any("…" in str(r["value"]) for r in rows[:-1])
+    assert rows[-1]["key"] == "(cut)"
+    shallow, cut = adapter_app.metadata_rows(RunRecord("", "r", {"uid": "r", "a": {"b": 1}}, None))
+    assert not cut and shallow[-1]["key"] != "(cut)"
 
 
 def test_run_summary_reports_metadata_truncation() -> None:

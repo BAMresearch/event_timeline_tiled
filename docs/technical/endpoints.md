@@ -143,9 +143,11 @@ The frame says nothing about completeness; that is `/clips/status`.
 levels; deeper values are JSON text. Lists of scalars are joined with `, `
 (strings as they are, other values as JSON: `true`, `null`); other lists are
 JSON text. Non-finite numbers become `null` everywhere. At most 2000 rows
-and 2000 characters per value (cut values end in `…`);
-`metadata_truncated` says whether anything was cut. Values are plain text:
-Grafana's tables show markup as text.
+and 2000 characters per value (cut values end in `…`, values nested deeper
+than JSON text can carry are `…`); `metadata_truncated` says whether
+anything was cut, and then the last row is `{"document": "", "key": "(cut)",
+"value": "Some values were cut: …"}`, so a table shows it. Values are plain
+text: Grafana's tables show markup as text.
 
 ## `GET /runs/{uid}/streams`
 
@@ -181,12 +183,21 @@ several streams appears once per stream, with that stream's units. `fields`
 lists each field name once; `units` gives each field the units of the first
 stream that has it.
 
-Kinds: `table`, `timeseries`, `summary`. View names in version 1:
-`readings`, `baseline` (MOUSE), `hinted`, `numeric`, `events`, `no_data`
-(fallback), `summary` (all runs). `hinted` and `numeric` always mean a time
+Kinds: `table`, `timeseries`, `summary`, `curve`, `image`. View names in
+version 1: `readings`, `baseline` (MOUSE), `hinted`, `numeric`, `events`,
+`no_data` (fallback), `summary` (all runs), `corrected_curve`,
+`corrected_image` (MOUSE processing runs). `hinted` and `numeric` always mean a time
 series of one stream's hinted numeric scalars, or all its numeric scalars:
 the fallback's stream, or the stream an instrument's entry names (MOUSE
 measurements: `mouse_eiger_measure`, after the default `readings`).
+
+A `curve` view reads 1D external arrays of one stream: `fields` are x, y
+and, if the stream declares one (a data key with `uncertainty_of` naming y),
+the uncertainty of y. An `image` view reads one 2D external array. Both read
+result 0 of a processing run's arrays (processing-runs.md §1.1). MOUSE
+processing runs: `corrected_curve` (`corrected_1d`: `Q`, `I`) is the
+default, then `corrected_image` (`corrected_2d`: `image`). A processing run
+that published neither gets the fallback views.
 
 ## `GET /runs/{uid}/data?view|kind&max_points&axis`
 
@@ -213,7 +224,10 @@ Rows of one view (default view if `view` is omitted). Every response has a
   ISO time as a number or string, which Grafana's time-series panel cannot
   use). All rows are read from Tiled (it cannot select rows), then decimated
   here.
-- `kind=table|timeseries|summary` instead of `view`: the first available
+- `curve`: the rows of `/runs/{uid}/curve` for this run (never followed to
+  another run).
+- `image`: no rows; the `notice` points to the image panel.
+- `kind=table|timeseries|summary|curve|image` instead of `view`: the first available
   view of that kind, or no rows and a `reason` if the run has none.
 - `summary`: the metadata rows of `/runs/{uid}`, `truncated` as
   `metadata_truncated`.
@@ -252,14 +266,109 @@ halfway between them, so the line breaks there.
   window's `ETT_MAX_RUNS`, or fields by `max_points`. The `notice` says
   which, and how many runs were left out for any reason.
 - No `timeseries` view: no rows, `view: null` and a `reason`.
-- Finished runs are read once and kept (up to two million values over all
-  runs, oldest use evicted first); open runs are read on every request.
-  Runs are read four at a time; a run that fails is retried once on its
-  own (some table stores, such as DuckDB in Tiled 0.2.21, fail reads made
-  at the same time).
+- Finished runs are read once and kept, per run, view and the selected
+  run's units of the fields (up to two million values and 5000 runs, oldest
+  use evicted first; a run with more than two million values is never
+  kept); open runs are read on every request. Runs are read four at a
+  time; a run that fails is retried once on its own. That retry does not
+  make DuckDB table storage reliable: Tiled 0.2.21 serves DuckDB through one
+  shared connection, and reads made at the same time by other requests
+  still fail; such runs are counted in `unreadable` (review 06).
+- The trend's cost grows with the events of the runs read, not with
+  `max_points`: every chosen run's columns are read whole (Tiled cannot
+  select rows). Bounding that work is open (review 06, finding 9).
 
 Runs that overlap in time (several sub-lanes) are joined in time order, so
 their lines interleave.
+
+## `GET /runs/{uid}/related`
+
+For a **measurement**: its processing runs (start `kind` a processing kind
+and its UID in `start.derived_from`), under every catalogue root, whatever
+their times. For a **processing run**: the measurements in its
+`derived_from`.
+
+`{"role", "rows": [...], "truncated", "default", "notice"}`, one row per run:
+
+| Field | Meaning |
+|---|---|
+| `relation` | `processing` or `measurement` |
+| `uid`, `label`, `start`, `stop`, `status`, `reason` | as in `/clips` (`label` `(not in Tiled)` for a listed measurement that is not found) |
+| `family` | `product · pipeline.name` (processing runs) |
+| `attempt` | the start document's `attempt` |
+| `usable` | `exit_status` `success`, the product in the stop document's `outputs`, and no `problems` |
+| `problems` | how a processing run breaks the contract, `; `-separated (unsupported or missing `processing_schema_version`, missing product, pipeline name, start UID or time, attempt, `request_id`, stop time, `outputs`, an unknown `exit_status`, a `derived_from` that is not a list of UIDs), or `null` |
+| `latest_attempt`, `latest_usable` | per family: the latest finished attempt, and the latest usable result (by stop time; ties by the greater start UID as text). Open attempts, and runs with `problems`, are never latest |
+| `mark` | the same as text, for tables: `latest usable`, `latest attempt`, `latest usable · latest attempt`, or `null` |
+
+`default` is the latest usable result over all families (`null` if none),
+which `/curve` and `/image` show for a measurement. Rows are by family (the
+family with the latest usable result first), then by start time. Families
+are told apart by `product` and `pipeline.name` themselves; `family` is
+their display label. At most 500 processing runs per root: with more
+(`truncated`), the latest one may not be among them, so nothing is marked
+latest, `default` is `null`, rows are unranked, and the `notice` says so.
+Never cached.
+
+The search is exact (decision D-008): `Like` on the quoted UID for UIDs of
+letters, digits, `.`, `~` and `-`; otherwise a scan of up to 10,000 runs
+with `start.derived_from`, `truncated` beyond that.
+
+For a processing run, the `notice` also names its `problems`.
+
+## `GET /runs/{uid}/curve?view&max_points`
+
+The run's first available `curve` view (or the one named `view`). For a
+**measurement**, the curve of its latest usable processing result
+(`default` of `/related`); for a processing run, its own, also when it is not
+usable (said in the `notice`).
+
+`{"view", "kind": "curve", "source": {"uid", "label", "family", "usable", "followed"},
+"x", "y", "uncertainty", "units", "rows": [{"x", "y", "y_lower", "y_upper"}],
+"truncated", "points", "plotted", "decimation", "non_finite", "non_positive",
+"lower_bound_dropped", "uncertainty_invalid", "description", "notice"}`
+
+The `notice` names the result as `label (family, first 8 characters of the
+UID)`.
+
+- For log–log axes: points with a non-finite or non-positive x or y are left
+  out and counted (`non_finite`, `non_positive`).
+- `y_lower`, `y_upper`: y ∓ the uncertainty; `null` without one; both
+  `null` where the uncertainty is negative or not finite
+  (`uncertainty_invalid`); `y_lower` `null` where it is not positive, and
+  either `null` where it is not finite (`lower_bound_dropped`).
+- `max_points` (10–20000, default 2000): every k-th point
+  (`decimation` k, `truncated` if k > 1).
+- Without a curve: no rows, `view` and `source` `null`, and the `notice`
+  says why (no processing run, no usable result and the latest attempt's
+  status, a processing run without the output, more processing runs than
+  `/related` can rank).
+- A result whose arrays Tiled cannot serve (a registered file that is gone
+  gives `HTTP 500` in Tiled 0.2.21): no rows, and a `notice` that it could
+  not be read.
+- Curves of finished processing runs are kept (32 most recent).
+
+## `GET /runs/{uid}/image?view&scale&size`
+
+The run's first available `image` view as a PNG, followed from a measurement
+as `/curve`. Also served as `/run-images/{uid}/image`, the path the proxy
+forwards for signed-in browsers (plan §6).
+
+- `scale`: `log` (default) or `linear`. On a log scale, zero, negative and
+  non-finite values are transparent; on a linear one, non-finite values.
+- Colours (viridis) span the 1st to the 99.5th percentile of the coloured
+  values; a constant image is drawn in the middle colour.
+- `size` (64–2048, default 768): the longer side at most, by block means of
+  finite values. Arrays are strided on the server first to at most
+  `min(2 × size, 2048)` pixels per side, so a render never reads more than
+  about four million values; at most two images render at the same time.
+  Row 0 is the top row.
+- Other parameters are ignored: the dashboard adds `t=${__to}` so that each
+  refresh asks again and a newer result replaces the old one.
+- `404` with a `detail` if there is no image (the reasons of `/curve`).
+- Caching: a finished processing run's own image `private, max-age=86400`;
+  a measurement's (its result can be superseded) `private, no-cache`; both
+  with an `ETag` (`If-None-Match` gives `304`). Open runs `no-store`.
 
 ## `GET /selection/...`
 
@@ -277,8 +386,10 @@ link, a run from another server): it gets a message, not `404`.
 | `/selection/fields?uid&stream` | as `/runs/{uid}/streams/{stream}/fields` | `[]` (also with `stream=` empty) |
 | `/selection/data?uid&view|kind&max_points&axis` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
 | `/selection/trend?uid&from&to&max_points&axis` | as `/runs/{uid}/trend` | no rows, `notice` "Select a run …" |
+| `/selection/related?uid` | as `/runs/{uid}/related` | no rows, `role` and `default` `null`, `notice` "Select a run …" |
+| `/selection/curve?uid&view&max_points` | as `/runs/{uid}/curve` | no rows, `notice` "Select a run …" |
 
 With a `uid` that is not found: `/selection/run` gives `{"selected": true,
 "found": false, "summary": [{"key": "run", "value": "The selected run is not
-in Tiled …"}], "metadata": [], "metadata_truncated": false}`, `/selection/data` and `/selection/trend` no rows with that `notice`, and
+in Tiled …"}], "metadata": [], "metadata_truncated": false}`, `/selection/data`, `/selection/trend`, `/selection/related` and `/selection/curve` no rows with that `notice`, and
 `/selection/streams` and `/selection/fields` `[]`.

@@ -30,6 +30,11 @@ class ViewKind(StrEnum):
     """Long rows from one stream: time (ms), field, value."""
     SUMMARY = "summary"
     """The run's start and stop metadata as key/value rows."""
+    CURVE = "curve"
+    """One result's y against x, from 1D external arrays of one stream, with
+    the y uncertainty if the stream declares one (``uncertainty_of``)."""
+    IMAGE = "image"
+    """One result's 2D external array, rendered as a PNG."""
 
 
 @frozen
@@ -43,11 +48,23 @@ class ViewSpec:
     hinted_only: bool = False
     """Time series: only the stream's hinted numeric scalars (as the
     fallback's ``hinted`` view), else all its numeric scalars (``numeric``)."""
+    fields: tuple[str, ...] = field(default=())
+    """Curve: the x and the y field; image: the image field."""
 
     @streams.validator
-    def _one_stream_per_series(self, _attribute: Any, streams: tuple[str, ...]) -> None:
-        if self.kind is ViewKind.TIMESERIES and len(streams) != 1:
-            raise ValueError("a time series view reads exactly one stream")
+    def _one_stream(self, _attribute: Any, streams: tuple[str, ...]) -> None:
+        if self.kind in _ONE_STREAM and len(streams) != 1:
+            raise ValueError(f"a {self.kind.value} view reads exactly one stream")
+
+    @fields.validator
+    def _array_fields(self, _attribute: Any, fields: tuple[str, ...]) -> None:
+        expected = _ARRAY_FIELDS.get(self.kind, 0)
+        if len(fields) != expected:
+            raise ValueError(f"a {self.kind.value} view names {expected} fields")
+
+
+_ONE_STREAM = frozenset({ViewKind.TIMESERIES, ViewKind.CURVE, ViewKind.IMAGE})
+_ARRAY_FIELDS = {ViewKind.CURVE: 2, ViewKind.IMAGE: 1}
 
 
 @frozen
@@ -123,6 +140,28 @@ MOUSE = InstrumentEntry(
                 SUMMARY,
             ),
         ),
+        # MoDaCor corrections (processing-runs.md §1): the corrected I(Q) curve
+        # and the corrected 2D image. Field names as in the draft contract.
+        Rule(
+            Role.PROCESSING,
+            (
+                ViewSpec(
+                    "corrected_curve",
+                    "Corrected curve",
+                    ViewKind.CURVE,
+                    ("corrected_1d",),
+                    fields=("Q", "I"),
+                ),
+                ViewSpec(
+                    "corrected_image",
+                    "Corrected image",
+                    ViewKind.IMAGE,
+                    ("corrected_2d",),
+                    fields=("image",),
+                ),
+                SUMMARY,
+            ),
+        ),
     ),
 )
 
@@ -162,6 +201,11 @@ class ResolvedView:
     columns: tuple[tuple[str, str, str | None], ...] = ()
     """``(stream, field, units)`` per stream, in display order: what a table
     view reads. ``fields`` and ``units`` are their de-duplicated summary."""
+
+    @property
+    def array_fields(self) -> bool:
+        """Curve and image views read external arrays, not event tables."""
+        return self.kind in (ViewKind.CURVE, ViewKind.IMAGE)
 
 
 def entry_for(instrument: Any) -> InstrumentEntry | None:
@@ -246,6 +290,39 @@ def _series_view(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedV
     )  # fmt: skip
 
 
+def _array_view(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedView:
+    """A curve (x, y and, if declared, the uncertainty of y) or an image, from
+    external array fields of one stream: 1D for a curve, 2D for an image."""
+    [name] = spec.streams
+    stream = streams.get(name)
+    dims = 1 if spec.kind is ViewKind.CURVE else 2
+    fields = list(spec.fields)
+    reason = ""
+    if stream is None:
+        reason = f"this run has no {name}"
+    else:
+        for f in fields:
+            key = stream.data_keys.get(f)
+            shape = key.get("shape") if key else None
+            if key is None:
+                reason = f"{name} has no {f}"
+            elif not key.get("external") or not isinstance(shape, list) or len(shape) != dims:
+                reason = f"{name}/{f} is not a {dims}D array"
+            if reason:
+                break
+        if not reason and spec.kind is ViewKind.CURVE:
+            y = fields[1]
+            fields += [
+                k
+                for k, v in stream.data_keys.items()
+                if v.get("uncertainty_of") == y and v.get("external")
+            ][:1]
+    return ResolvedView(
+        spec.name, spec.title, spec.kind, (name,), tuple(fields), _units(stream, fields),
+        available=not reason, reason=reason,
+    )  # fmt: skip
+
+
 def _summary() -> ResolvedView:
     return ResolvedView(
         SUMMARY.name, SUMMARY.title, ViewKind.SUMMARY, (), (), {}, available=True, reason=""
@@ -315,20 +392,23 @@ def _fallback(streams: Mapping[str, StreamInfo]) -> list[ResolvedView]:
     return views
 
 
+def _resolve_spec(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedView:
+    if spec.kind is ViewKind.SUMMARY:
+        return _summary()
+    if spec.kind is ViewKind.TIMESERIES:
+        return _series_view(spec, streams)
+    if spec.kind in (ViewKind.CURVE, ViewKind.IMAGE):
+        return _array_view(spec, streams)
+    return _table_view(spec, streams)
+
+
 def resolve(run: RunRecord, role: Role, streams: Sequence[StreamInfo]) -> list[ResolvedView]:
     """The views of a run, the default first."""
     by_name = {s.name: s for s in streams}
     entry = entry_for(run.start.get("instrument"))
     for rule in entry.rules if entry else ():
         if rule.matches(run, role):
-            resolved = [
-                _summary()
-                if spec.kind is ViewKind.SUMMARY
-                else _series_view(spec, by_name)
-                if spec.kind is ViewKind.TIMESERIES
-                else _table_view(spec, by_name)
-                for spec in rule.views
-            ]
+            resolved = [_resolve_spec(spec, by_name) for spec in rule.views]
             if any(v.available and v.kind is not ViewKind.SUMMARY for v in resolved):
                 return sorted(resolved, key=lambda v: not v.available)
     return _fallback(by_name)

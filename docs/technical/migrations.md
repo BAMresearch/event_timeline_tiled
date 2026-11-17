@@ -60,3 +60,30 @@ After the first look at the lab Tiled (2026-11-17):
   With it, the frame may end with empty lanes whose fields are `null`
   except `lane`, `start` and `stop`; consumers that pass it must not expect
   a `uid` on every row.
+
+Step 6, corrected views (2026-11-17):
+
+- New endpoints `/runs/{uid}/related`, `/runs/{uid}/curve`,
+  `/runs/{uid}/image` (also `/run-images/{uid}/image`), `/selection/related`
+  and `/selection/curve`. Additive.
+- New view kinds `curve` and `image`, and the view names `corrected_curve`
+  and `corrected_image`. View table: MOUSE processing runs gain these
+  views, so their default view changes from `summary` (under the fallback's
+  unavailable `no_data`) to `corrected_curve`, and `/runs/{uid}/data`
+  without `view` returns curve rows (`x`, `y`, `y_lower`, `y_upper`) for
+  them. Consumers that expected metadata rows from a processing run's
+  default view must ask for `view=summary`. Processing runs that published
+  no output are unchanged.
+- `/runs/{uid}/data?kind=` accepts `curve` and `image`.
+
+After review 06 (2026-11-17):
+
+- Metadata rows (`/runs/{uid}`, `/selection/run`, the `summary` view) end in
+  a `(cut)` row whenever `metadata_truncated` is true, and depth cuts now set
+  `metadata_truncated` too. Consumers that count rows must skip that row.
+- A finished run whose stop document reports events for a stream whose table
+  Tiled does not have is an error (`502`, or `unreadable` in a trend), no
+  longer an empty stream.
+- `/related`: new row field `problems`; with more processing runs than the
+  cap, nothing is marked latest and `default` is `null`. `/curve`: new fields
+  `source.family` and `uncertainty_invalid`.

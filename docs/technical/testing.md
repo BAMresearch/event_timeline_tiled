@@ -10,7 +10,9 @@ uv run --locked mypy src
 No test contacts a production service or the lab network. Contract tests
 start an in-process Tiled (built like Tiled's `SimpleTiledServer`, but with
 the catalogue and the tables both in SQLite, or both in PostgreSQL; never
-DuckDB, whose single shared connection fails reads made at the same time)
+DuckDB, whose single shared connection fails reads made at the same time.
+That failure is not fixed by the adapter: a server with DuckDB tables can
+leave runs unreadable in trends under concurrent requests; review 06)
 and fill it with the
 window scenario: MOUSE-like runs written by a real RunEngine through
 `TiledWriter`, retimed onto the edge cases of plan §5.4, and processing runs

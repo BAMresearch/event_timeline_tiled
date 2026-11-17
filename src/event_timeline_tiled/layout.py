@@ -9,20 +9,37 @@ The only module that knows how ``bluesky.callbacks.tiled_writer.TiledWriter``
   ``configuration`` in its metadata;
 - scalar event data is the table ``{run}/{stream}/internal`` with columns
   ``seq_num``, ``time``, each field and ``ts_{field}``;
-- external arrays are ``{run}/{stream}/{field}``.
+- external arrays are ``{run}/{stream}/{field}``; a processing run's arrays
+  carry a leading result dimension, read at index 0 (processing-runs.md §1.1).
 
 Searches are server-side and paged; runs are never fetched one by one for a
 window. ``Contains`` is never used for UID membership (it matches substrings).
+
+Processing runs of a measurement (processing-runs.md §1.2, decision D-008)
+are checked for exact ``start.derived_from`` list membership here, after a
+server-side search for candidates. ``Eq`` with a list is JSONB containment
+on PostgreSQL, but Tiled 0.2.21 cannot bind a list on SQLite (the server
+fails), and the adapter does not know which catalogue it reads. So:
+
+- a UID of letters, digits, ``.``, ``~`` and ``-`` only (UUIDs): ``Like`` on
+  the JSON-quoted UID. None of these characters is a ``LIKE`` wildcard or
+  escaped in JSON, so the candidates are exactly the runs that list it;
+- any other UID (``_`` is a wildcard, non-ASCII and ``\\`` are serialised
+  differently by the databases): every run with ``start.derived_from``,
+  capped at :data:`SCAN_MAX_RUNS`.
 """
 
 from __future__ import annotations
 
+import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import numpy as np
 from attrs import field, frozen
-from tiled.queries import Comparison, KeyPresent
+from tiled.queries import Comparison, In, KeyPresent, Like
 
 from .tiled_http import HealthStatus, Query, SourceError, TiledReader
 
@@ -38,6 +55,29 @@ def _compare(operator: str, key: str, value: float) -> Query:
 def _no_stop() -> Query:
     query: Query = KeyPresent("stop", exists=False)
     return query
+
+
+def _key_present(key: str) -> Query:
+    query: Query = KeyPresent(key, exists=True)
+    return query
+
+
+def _like(key: str, pattern: str) -> Query:
+    query: Query = Like(key, pattern)
+    return query
+
+
+def _in(key: str, values: Sequence[str]) -> Query:
+    query: Query = In(key, list(values))
+    return query
+
+
+SCAN_MAX_RUNS = 10_000
+"""Runs with ``derived_from`` scanned at most for a UID ``Like`` cannot match."""
+_LIKE_SAFE = re.compile(r"^[A-Za-z0-9.~-]+$")
+
+MAX_ARRAY_BYTES = 64 * 1024 * 1024
+"""Largest array slice read from Tiled in one request."""
 
 
 def _finite(value: Any) -> float | None:
@@ -89,6 +129,15 @@ class RunRecord:
         counts = None if self.stop is None else self.stop.get("num_events")
         value = counts.get(stream) if isinstance(counts, Mapping) else None
         return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+@frozen
+class ArrayInfo:
+    """One result of an external array: its shape (without the leading result
+    dimension) and its numeric type."""
+
+    shape: tuple[int, ...]
+    dtype: np.dtype[Any] = field(eq=False)
 
 
 @frozen
@@ -175,6 +224,76 @@ class Layout:
                     return record
         return None
 
+    def derived_runs(self, root: str, uid: str, max_runs: int) -> tuple[list[RunRecord], bool]:
+        """Runs under ``root`` whose ``start.derived_from`` list holds ``uid``
+        (any role; the caller decides what a processing run is), at most
+        ``max_runs``. Returns ``(runs, truncated)``: ``truncated`` is true when
+        more may exist, so the runs cannot be taken as complete."""
+        if _LIKE_SAFE.match(uid):
+            query = _like("start.derived_from", f"%{json.dumps(uid)}%")
+            cap = max_runs
+        else:
+            query, cap = _key_present("start.derived_from"), SCAN_MAX_RUNS
+        items, truncated = self.reader.search(root, [query], max_items=cap)
+        runs = []
+        for record in (_record(root, item) for item in items):
+            parents = None if record is None else record.start.get("derived_from")
+            if record is not None and isinstance(parents, list) and uid in parents:
+                runs.append(record)
+        if len(runs) > max_runs:
+            runs, truncated = runs[:max_runs], True
+        return runs, truncated
+
+    def runs_by_start_uid(self, root: str, uids: Sequence[str]) -> list[RunRecord]:
+        """Runs under ``root`` whose start document has one of ``uids``, in one
+        search."""
+        if not uids:
+            return []
+        items, _ = self.reader.search(root, [_in("start.uid", uids)], max_items=len(uids) * 2)
+        records = (_record(root, item) for item in items)
+        return [r for r in records if r is not None and r.start_uid in uids]
+
+    def result_info(self, run: RunRecord, stream: str, name: str) -> ArrayInfo:
+        """Shape and type of an external array field of a processing run."""
+        body = self.reader.get_json(f"/metadata/{_join(run.path, f'{stream}/{name}')}")
+        attributes = (body.get("data") or {}).get("attributes") or {}
+        structure = attributes.get("structure") or {}
+        shape, data_type = structure.get("shape"), structure.get("data_type") or {}
+        if (
+            attributes.get("structure_family") != "array"
+            or not isinstance(shape, list)
+            or len(shape) < 2
+            or not all(isinstance(n, int) and n >= 0 for n in shape)
+            or shape[0] < 1
+        ):
+            raise SourceError(HealthStatus.ERROR, f"{stream}/{name} is not a result array")
+        kind, size = data_type.get("kind"), data_type.get("itemsize")
+        endianness = str(data_type.get("endianness"))
+        order = {"little": "<", "big": ">", "not_applicable": "|"}.get(endianness)
+        if kind not in {"f", "i", "u"} or not isinstance(size, int) or order is None:
+            raise SourceError(HealthStatus.ERROR, f"{stream}/{name} is not numeric")
+        return ArrayInfo(tuple(shape[1:]), np.dtype(f"{order}{kind}{size}"))
+
+    def result_array(
+        self, run: RunRecord, stream: str, name: str, info: ArrayInfo, step: int = 1
+    ) -> np.ndarray[Any, Any]:
+        """Result 0 of an external array field, every ``step``-th element along
+        each axis (strided on the server), as float64."""
+        step = max(1, step)
+        shape = tuple(-(-n // step) for n in info.shape)
+        expected = math.prod(shape) * info.dtype.itemsize
+        if expected > MAX_ARRAY_BYTES:
+            raise SourceError(HealthStatus.ERROR, f"{stream}/{name} is too large to read")
+        selection = ",".join(["0", *([f"::{step}"] * len(info.shape))])
+        body = self.reader.get_bytes(
+            f"/array/full/{_join(run.path, f'{stream}/{name}')}",
+            {"slice": selection, "format": "application/octet-stream"},
+            max_bytes=expected,
+        )
+        if len(body) != expected:
+            raise SourceError(HealthStatus.ERROR, f"{stream}/{name}: unexpected array size")
+        return np.frombuffer(body, dtype=info.dtype).reshape(shape).astype(np.float64)
+
     def streams(self, run: RunRecord) -> list[StreamInfo]:
         items, _ = self.reader.search(run.path, fields=("metadata",))
         out = []
@@ -237,12 +356,17 @@ class Layout:
         ``TiledWriter`` creates a stream's table with its first batch of rows
         (``batch_size`` rows, or at the stop document), so a listed stream of a
         running run often has none: that is "no events written yet", not an
-        error."""
+        error. A finished run whose stop document reports events for the
+        stream must have its table: there, a missing table is missing data."""
         try:
             return self.reader.table_columns(f"{run.path}/{stream}/{TABLE}", columns)
         except SourceError as exc:
             if exc.status is not HealthStatus.NOT_FOUND:
                 raise
+            if run.stop is not None and (run.num_events(stream) or 0) > 0:
+                raise SourceError(
+                    HealthStatus.ERROR, f"{stream} reports events but has no table"
+                ) from None
             return {name: [] for name in columns}
 
 

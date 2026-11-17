@@ -33,6 +33,23 @@ From top to bottom, in sections you can collapse by clicking their title
   (`MOUSE /2`). Very short runs are drawn a little wider than they are, so
   they stay visible; their real times are in the run details. With few
   lanes, the rest of the panel stays empty.
+- **Corrected data.** The corrected result of the selected run: for a
+  measurement, its latest usable processing result (successful, with its
+  product published); for a processing run, its own, with a note if it is
+  not usable. *Corrected curve* plots it on log–log axes, with dashed
+  bounds y − σ and y + σ where the result gives an uncertainty; the line
+  above it names the fields, their units, and points left out (zero or
+  negative values cannot be drawn on log axes). *Corrected image* shows the
+  2D result on a log scale; zero and negative values are transparent. It
+  says "No corrected image" when there is none, and is fetched again on
+  every refresh, so a newer result replaces it. *Related runs* lists a
+  measurement's processing runs, marking per result family the latest
+  attempt and the latest usable result, or a processing run's measurements;
+  click a label to select that run. A measurement without processing says
+  so; a newer attempt that failed is named in the line above the curve,
+  which also names the result shown (label, family and the start of its
+  UID). Runs that break the processing contract are listed with their
+  problems and never shown as the latest result.
 - **Trend: runs like the selected one.** The selected run's time series
   together with every run like it in the time range: the same lane, the
   same plan (`plan_name`) and the same view. Each field is one line across
@@ -45,7 +62,7 @@ From top to bottom, in sections you can collapse by clicking their title
   record, one row per key (nested keys dotted, for example
   `versions.bluesky`): sample and configuration identifiers, plan
   parameters, the exit status and the event count per stream. Very long
-  values end in `…` where they were cut.
+  values end in `…` where they were cut; then the last row says so.
 - **Stream fields, collapsed.** Click a stream in *Streams*, then open
   this section to see its fields, types, shapes and units.
 

@@ -3,6 +3,43 @@
 Short records of decisions made while building; the plan's §14 holds the
 maintainer's decisions from the design phase. Newest first.
 
+## D-009 — Corrected data in a row of fixed panels (2026-11-17)
+
+Plan §8 left open how the dashboard switches between view kinds (table,
+time series, curve, image): an Auto grid viewer with show/hide rules, or
+detail dashboards per kind. Show/hide rules need dynamic dashboards (schema
+v2), whose file provisioning is still experimental in Grafana 13.3.1, and
+detail dashboards would cost a navigation per selection. Instead each kind
+has fixed panels: the curve and the image sit in a *Corrected data* row,
+always present. For a run without them they are empty, and a notice line
+says why (no processing run, no usable result, the latest attempt failed).
+The row can be collapsed. Selecting a measurement shows its latest usable
+processing result there directly. Revisit in step 8 with dynamic dashboards.
+
+## D-008 — Processing runs found with `Like`, checked exactly (2026-11-17, revised after review 06)
+
+Processing-runs.md §1.2 finds a measurement's processing runs with
+`Eq('start.derived_from', [uid])`, JSONB containment on PostgreSQL. On
+SQLite, Tiled 0.2.21 binds the list as an SQL value, which the driver
+refuses: the search fails with a server error. The adapter does not know
+which catalogue a server uses. It therefore searches with
+`Like('start.derived_from', '%"<uid>"%')` (the UID quoted as JSON, so a
+UID that is part of another does not match), which works on both and in
+Tiled 0.2.7 (the lab server's version, source checked), and keeps only runs
+whose `derived_from` list holds the UID exactly. The cost: on PostgreSQL the
+search cannot use the metadata GIN index and filters the root's runs, as
+the window searches already do (spike: 2.5 ms for 5,000 runs). Never
+`Contains`, which matches substrings without the quotes.
+
+Review 06 (finding 5) showed this is lossless only for some UIDs: `_` is a
+`LIKE` wildcard (false candidates can use up the cap), and non-ASCII
+characters and backslashes are serialised differently by JSON and the
+databases (a run with `derived_from: ["párent"]` was not found on SQLite).
+So `Like` is used only for UIDs of letters, digits, `.`, `~` and `-` (all
+UUIDs), for which the candidates are exactly the matches. Any other UID is
+looked up by scanning the runs that have `start.derived_from` (at most
+10,000, reported as truncated beyond), checked exactly in the adapter.
+
 ## D-007 — Timeline refresh stays at 30 s until the operator trial (2026-11-16)
 
 Plan §1 asks for a 5–10 s refresh. Each refresh of the Timeline dashboard

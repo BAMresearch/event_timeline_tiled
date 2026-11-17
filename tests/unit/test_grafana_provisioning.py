@@ -26,6 +26,8 @@ ENDPOINTS = {
     "/selection/fields",
     "/selection/data",
     "/selection/trend",
+    "/selection/related",
+    "/selection/curve",
 }
 
 
@@ -141,7 +143,17 @@ def test_time_series_puts_other_units_on_a_second_axis() -> None:
 NULLABLE = {
     "Failed and aborted": {"reason"},
     "Streams": {"last_event"},
-    "Run data (default view)": {"units", "value", "time"},
+    "Run data (default view)": {"units", "value", "time", "y_lower", "y_upper"},
+    "Related runs": {
+        "family",
+        "attempt",
+        "mark",
+        "problems",
+        "status",
+        "usable",
+        "start",
+        "reason",
+    },
     "Fields of ${stream}": {"units", "shape", "dtype"},
     "Run metadata": {"value"},
 }
@@ -161,7 +173,7 @@ def test_null_cells_never_show_the_empty_panel_text() -> None:
         }
         assert nullable <= overrides, title
     notices = [p for p in _panels(timeline) if p["type"] == "stat" and not p["title"]]
-    assert len(notices) == 2  # selected run's data, trend
+    assert len(notices) == 3  # selected run's data, corrected curve, trend
     assert all(n["fieldConfig"]["defaults"]["noValue"] == "\u2013" for n in notices)
 
 
@@ -183,3 +195,22 @@ def test_timeline_dashboard_is_in_collapsible_rows() -> None:
     above = [p["title"] for p in panels if p["gridPos"]["y"] < first_row]
     assert set(above) == {"", "Queue", "Data status"}  # the help text has no title
     assert all(not r["panels"] for r in rows[:-1]) and rows[-1]["panels"]
+
+
+def test_corrected_data_panels() -> None:
+    """The curve on log–log axes with x chosen by name (Infinity orders columns
+    alphabetically); the image from the browser through the proxy's signed-in
+    route, relative to Grafana's origin, never from the adapter's address."""
+    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
+    panels = {p["title"]: p for p in _panels(timeline)}
+    curve = panels["Corrected curve"]
+    assert curve["type"] == "xychart" and curve["options"]["mapping"] == "auto"
+    assert curve["options"]["series"] == [{"x": {"matcher": {"id": "byName", "options": "x"}}}]
+    scale = curve["fieldConfig"]["defaults"]["custom"]["scaleDistribution"]
+    assert scale == {"type": "log", "log": 10}
+    image = panels["Corrected image"]
+    assert (image["type"], image["options"]["mode"]) == ("text", "html")
+    [src] = re.findall(r'src="([^"]*)"', image["options"]["content"])
+    assert src.startswith("/run-images/${run:percentencode}/image?")
+    assert "t=${__to}" in src  # a new URL on each refresh: newer results appear
+    assert "adapter" not in image["options"]["content"]

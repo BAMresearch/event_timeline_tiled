@@ -16,8 +16,11 @@ Checks, through the published proxy and inside the containers:
 5. every panel query of the timeline dashboard (collapsed rows included)
    returns without error with no run selected, with a MOUSE measurement and
    with the generic instrument's run selected; the timeline frame has clips,
-   Data status has a row, and the generic run has a time series.
-6. the demo RE Manager is reachable through /queues (read-only).
+   Data status has a row, the generic run has a time series, and the MOUSE
+   measurement has related runs and a corrected curve.
+6. signed in through Grafana's login, the browser's image route returns the
+   MOUSE measurement's corrected image as a PNG.
+7. the demo RE Manager is reachable through /queues (read-only).
 
 Prints statuses only, never credentials. Exit status 0 if all pass.
 """
@@ -66,6 +69,31 @@ def http(path: str, body: dict[str, object] | None = None, auth: bool = True) ->
         return exc.code, exc.read()
     except OSError:  # URLError, connection errors and timeouts
         return 0, b""
+
+
+def session_cookie() -> str:
+    """A Grafana session cookie, as a browser gets it by signing in."""
+    request = urllib.request.Request(BASE + "/login", method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.data = json.dumps({"user": "admin", "password": ENV["GF_ADMIN_PASSWORD"]}).encode()
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            cookies = response.headers.get_all("Set-Cookie") or []
+    except OSError:
+        return ""
+    return "; ".join(c.split(";", 1)[0] for c in cookies if c.startswith("grafana_session"))
+
+
+def image(path: str, cookie: str) -> tuple[int, str, bytes]:
+    request = urllib.request.Request(BASE + path)
+    request.add_header("Cookie", cookie)
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, response.headers.get("Content-Type", ""), response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, "", b""
+    except OSError:
+        return 0, "", b""
 
 
 def in_adapter(*command: str) -> subprocess.CompletedProcess[str]:
@@ -230,6 +258,18 @@ def main() -> None:
         if name == "generic run selected":
             series = rows.get("Run time series", 0)
             check("generic run has a time series", series > 0, f"{series} points")
+        if name == "MOUSE run selected":
+            related = rows.get("Related runs", 0)
+            check("MOUSE run has related runs", related > 0, f"{related} rows")
+            curve = rows.get("Corrected curve", 0)
+            check("MOUSE run has a corrected curve", curve > 0, f"{curve} points")
+
+    cookie = session_cookie()
+    check("signed in through Grafana's login", bool(cookie))
+    status, kind, body = image(f"/run-images/{run}/image?size=128", cookie)
+    check("corrected image through the signed-in route",
+          status == 200 and kind == "image/png" and body.startswith(b"\x89PNG"),
+          f"HTTP {status}, {kind or 'no type'}, {len(body)} bytes")  # fmt: skip
 
     if failures:
         sys.exit(f"{len(failures)} smoke check(s) failed: {', '.join(failures)}")
