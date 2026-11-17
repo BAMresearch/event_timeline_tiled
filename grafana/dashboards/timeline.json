@@ -2524,12 +2524,6 @@
    "type": "row",
    "title": "Stream fields (choose a stream in Streams)",
    "collapsed": true,
-   "gridPos": {
-    "x": 0,
-    "y": 69,
-    "w": 24,
-    "h": 1
-   },
    "panels": [
     {
      "type": "table",
@@ -2642,7 +2636,13 @@
       ]
      }
     }
-   ]
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 69,
+    "w": 24,
+    "h": 1
+   }
   }
  ]
 }

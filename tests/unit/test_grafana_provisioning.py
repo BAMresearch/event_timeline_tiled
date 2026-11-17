@@ -214,3 +214,25 @@ def test_corrected_data_panels() -> None:
     assert src.startswith("/run-images/${run:percentencode}/image?")
     assert "t=${__to}" in src  # a new URL on each refresh: newer results appear
     assert "adapter" not in image["options"]["content"]
+
+
+def test_timeline_dashboard_is_what_the_generator_writes() -> None:
+    """``grafana/generator`` builds timeline.json; edit it, not the JSON, and
+    run ``uv run --locked python grafana/generator``."""
+    import importlib.util
+    import sys
+
+    generator = GRAFANA / "generator"
+    sys.path.insert(0, str(generator))
+    try:
+        spec = importlib.util.spec_from_file_location("ett_generator", generator / "__main__.py")
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        written = module.render(module.dashboard())
+    finally:
+        sys.path.remove(str(generator))
+    assert written == (GRAFANA / "dashboards" / "timeline.json").read_text(), (
+        "timeline.json differs from the generator's output: run `uv run --locked python "
+        "grafana/generator`"
+    )

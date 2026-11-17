@@ -3,6 +3,17 @@
 Short records of decisions made while building; the plan's §14 holds the
 maintainer's decisions from the design phase. Newest first.
 
+## D-010 — The Timeline dashboard is generated, the JSON committed (2026-11-17)
+
+`timeline.json` had grown to 25 panels (2,600 lines) built by a script kept
+outside the repository. Grafana's file provisioning has no includes, and
+library panels cannot be provisioned from files, so the JSON cannot be split
+for Grafana. The generator now lives in `grafana/generator/`, one function
+per row with positions relative to the row, and writes the JSON that Grafana
+provisions; the JSON stays committed and declarative, and a test fails if it
+differs from the generator's output. The first generated file equals the
+earlier one as data (only the key order of one row changed).
+
 ## D-009 — Corrected data in a row of fixed panels (2026-11-17)
 
 Plan §8 left open how the dashboard switches between view kinds (table,
