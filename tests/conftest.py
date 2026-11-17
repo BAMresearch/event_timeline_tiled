@@ -37,8 +37,11 @@ TEST_API_KEY = secrets.token_hex(16)
 class CatalogServer:
     """A Tiled server on a background thread with the given catalogue URI.
 
-    Mirrors ``tiled.server.SimpleTiledServer`` (Tiled 0.2.21), which always
-    uses SQLite, so that the same tests can run against PostgreSQL.
+    Like ``tiled.server.SimpleTiledServer`` (Tiled 0.2.21), but with any
+    catalogue URI, so that the same tests run against PostgreSQL. Tables go to
+    SQLite unless ``table_storage`` says otherwise; not to DuckDB, as in
+    ``SimpleTiledServer``, whose single shared connection fails reads made at
+    the same time (one database engine fewer, and no flaky tests).
     """
 
     def __init__(
@@ -59,7 +62,7 @@ class CatalogServer:
             catalog_uri,
             writable_storage=[
                 directory / "data",
-                table_storage or f"duckdb:///{directory / 'storage.duckdb'}",
+                table_storage or f"sqlite:///{directory / 'tables.sqlite'}",
             ],
             readable_storage=[self.processed_dir],
             init_if_not_exists=True,
@@ -164,16 +167,10 @@ def _seed(url: str, api_key: str, processed: Path) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="session")
-def tiled_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
-    from tiled.server import SimpleTiledServer
-
-    root = tmp_path_factory.mktemp("tiled")
-    processed = root / "processed"
-    processed.mkdir()
-    server = SimpleTiledServer(
-        directory=root / "server", api_key=TEST_API_KEY, readable_storage=[processed]
-    )
-    server.processed_dir = processed  # type: ignore[attr-defined]
+def tiled_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[CatalogServer]:
+    """An empty SQLite-backed Tiled server, for tests that write their own runs."""
+    directory = tmp_path_factory.mktemp("tiled")
+    server = CatalogServer("sqlite", f"sqlite:///{directory / 'catalog.db'}", directory)
     try:
         yield server
     finally:
@@ -181,13 +178,13 @@ def tiled_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
 
 
 @pytest.fixture(scope="session")
-def tiled_base_url(tiled_server: Any) -> str:
-    parts = urlsplit(tiled_server.uri)
+def tiled_base_url(tiled_server: CatalogServer) -> str:
+    parts = urlsplit(tiled_server.url)
     return f"{parts.scheme}://{parts.netloc}"
 
 
 @pytest.fixture(scope="session")
-def window_manifest(tiled_server: Any, tiled_base_url: str) -> dict[str, Any]:
+def window_manifest(tiled_server: CatalogServer, tiled_base_url: str) -> dict[str, Any]:
     return _seed(tiled_base_url, tiled_server.api_key, Path(tiled_server.processed_dir))
 
 
