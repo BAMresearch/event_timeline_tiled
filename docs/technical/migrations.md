@@ -37,3 +37,9 @@ After the electrochemistry trial (2026-11-16):
 - In the frame, sub-lanes are allocated by true extent, and a short clip is
   widened only up to the next clip in its sub-lane: runs queued back to
   back no longer move to a sub-lane at coarse zoom.
+- The generic fallback views of a run without a `primary` stream use the
+  first stream with hinted numeric fields, and `baseline` only when there
+  is no other stream; before, they used the first stream by name. View
+  names are unchanged.
+- View table: new entry `electrochemistry-k2460` (labels, stall threshold;
+  its views are the fallback's).

@@ -87,8 +87,11 @@ already preferred a central Tiled when several instruments are watched.
 Implemented in the instrument repositories, not here:
 
 - Start documents carry `facility` (`"BAM"`) and `instrument` (`"MOUSE"`,
-  `"electrochemistry"`), set in `RE.md` in the QueueServer start-up, and
-  `station` where one instrument runs several independent stations.
+  `"electrochemistry-k2460"`), set in `RE.md` in the QueueServer start-up,
+  and `station` where one instrument runs several independent stations.
+  electrochemistry-bluesky (v0.2.0) writes `instrument` and `station`
+  (`"k2460-<serial>"`, `"simulator"` or a name from the session) and
+  `facility` only when the session sets it.
 - Processing runs copy `facility`, `instrument` and `station` from their
   measurement.
 
@@ -98,9 +101,9 @@ derived from it. Runs without `instrument` go to a labelled fallback: the
 configured catalogue root they were found under if that identifies an
 instrument, else `(unknown)`. A fallback never creates one lane per run.
 
-Today neither instrument sets these keys (both use `RunEngine({})`), so
-existing MOUSE runs land in the fallback lane. Setting them in `mouse_bluesky`
-is a prerequisite for the operator trial.
+MOUSE does not set these keys yet (`RunEngine({})`), so existing MOUSE runs
+land in the fallback lane. Setting them in `mouse_bluesky` is a prerequisite
+for the operator trial ([brief](upstream/brief-mouse-bluesky.md)).
 
 ### 3.2 MOUSE runs (from `mouse_bluesky` source; not yet checked against real descriptors)
 
@@ -370,7 +373,7 @@ plus a default. Endpoints only resolve what the table says.
 | MOUSE processing run, usable | corrected 1D I(Q), log–log; uncertainty as I−σ and I+σ bounding curves plus a table (XY chart has no error bars) | XY chart, log scale on both X and Y fields |
 | MOUSE processing run, usable | corrected 2D image | Text panel with an `<img>` via the image route (section 6) |
 | anything else (fallback) | hinted numeric scalars against time; else all numeric scalars; else a bounded table; else "no plottable data" | Time series / Table |
-| electrochemistry (later) | voltage and current against time | Time series; XY chart |
+| electrochemistry-k2460 | the fallback, driven by its hints: voltage and current of `readout` against time; labels `measurement_id` · `sample_id`; possibly stalled after 10 minutes | Time series |
 
 The table also holds each instrument's possibly-stalled threshold.
 
@@ -687,6 +690,16 @@ presets in the browser; alerting; raw MOUSE detector frames.
   columns, a strict point budget, bounded metadata, unique lane names,
   padded zoom bounds, transport-level read-only queue tests, and a 30 s
   refresh default until step 4 (decision D-007).
+
+- Electrochemistry trial 2026-11-16, on electrochemistry-bluesky's
+  simulator with its local Tiled store and a real RE Manager: fixed a
+  running run's streams before their first batch, runs queued back to back
+  splitting into sub-lanes, and selections of runs the server does not
+  have. Upstream ([brief](upstream/brief-electrochemistry-bluesky.md),
+  [reply](upstream/response-electrochemistry-bluesky.md)): electrochemistry-
+  bluesky v0.2.0 names its set-up, flushes rows every `flush_s` (10 s),
+  hints voltage and current, and keeps local tables in SQLite. Its view
+  table entry follows (§7). MOUSE: [brief](upstream/brief-mouse-bluesky.md).
 
 ## 15. Open questions
 

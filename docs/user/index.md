@@ -21,7 +21,8 @@ Laid out like a video editor:
   the recorded reason, and for the selected run its details and streams.
 - **Top right:** the selected run's data in its default view (for MOUSE
   measurements: the readings of `mouse_eiger_measure`, `snapshot` and
-  `baseline`), and a time series when the run has one. The line above the
+  `baseline`; for electrochemistry runs: voltage and current), and a time
+  series when the run has one. The line above the
   data says which view it is and whether rows were left out (a table shows
   at most 2000 rows).
 - **Top:** *Queue*, per instrument: the RE Manager's state (`idle`,
