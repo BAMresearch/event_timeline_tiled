@@ -85,7 +85,9 @@ Deployment requirements that follow:
 
 `derived_from` stays a list. On PostgreSQL, "processing runs of measurement
 X" is `Eq('start.derived_from', [X])` (JSONB containment). `Contains` must not
-be used: it is substring matching. Tiled has no cross-run anti-join, so the
+be used: it is substring matching. The viewer, which must also read SQLite
+catalogues, searches with `Like` on the quoted UID and checks list
+membership itself (decision D-008). Tiled has no cross-run anti-join, so the
 watcher and the viewer compute "measurements without processing" from two
 searches. "Without processing" must say which: no attempt, no finished
 attempt, or no usable result.

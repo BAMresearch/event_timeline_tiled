@@ -1,6 +1,6 @@
 # Plan: event-timeline-tiled (prototype)
 
-Status: draft, revision 7 (2026-11-15). Reviewed by Codex: architecture
+Status: draft, revision 8 (2026-11-17). Reviewed by Codex: architecture
 ([response-01](reviews/response-01-architecture.md),
 [disposition-01](reviews/disposition-01.md)), Tiled access
 ([response-02](reviews/response-02-tiled-access.md),
@@ -370,8 +370,8 @@ plus a default. Endpoints only resolve what the table says.
 |---|---|---|
 | MOUSE measurement | readings: `baseline`, `snapshot`, `mouse_eiger_measure` (default); time series of `mouse_eiger_measure`: its hinted numeric scalars, else all numeric scalars (for *Run time series* and the trend) | Table; Time series |
 | MOUSE configuration / vacuum run | summary + baseline | Table |
-| MOUSE processing run, usable | corrected 1D I(Q), log–log; uncertainty as I−σ and I+σ bounding curves plus a table (XY chart has no error bars) | XY chart, log scale on both X and Y fields |
-| MOUSE processing run, usable | corrected 2D image | Text panel with an `<img>` via the image route (section 6) |
+| MOUSE processing run (`corrected_curve`, default); a measurement shows its latest usable result's | corrected 1D I(Q), log–log; uncertainty as I−σ and I+σ bounding curves (XY chart has no error bars); the points as a table in the default view | XY chart, log scale on both X and Y fields |
+| MOUSE processing run (`corrected_image`); likewise | corrected 2D image | Text panel with an `<img>` via the image route (section 6) |
 | anything else (fallback) | hinted numeric scalars against time; else all numeric scalars; else a bounded table; else "no plottable data" | Time series / Table |
 | electrochemistry-k2460 | the fallback, driven by its hints: voltage and current of `readout` against time; labels `measurement_id` · `sample_id`; possibly stalled after 10 minutes | Time series |
 
@@ -431,11 +431,10 @@ running Grafana.
 - **Top right:** a fixed **Table** fed by the run's default view (MOUSE
   readings, or the generic fallback), plus a time series for time-series
   views. Grafana can show and hide panels on a variable only in its "Auto
-  grid" layout, which may not keep the NLE geometry. So switching between view
-  kinds (table, time series, curve, image) is decided in step 6: either an
-  Auto grid viewer proven to keep the layout, or small detail dashboards per
-  view kind, linked from the overview. Dashboards test view kinds, never
-  instrument names.
+  grid" layout, which may not keep the NLE geometry. Step 6 decided
+  (D-009): fixed panels per view kind, curve and image in a *Corrected
+  data* row, empty with a notice when the run has none. Dashboards test
+  view kinds, never instrument names.
 - A header line: "Recorded runs from Tiled", and *Data status* (section 5.3).
 - The queue-status panel (section 5.5), top left, for each instrument with a
   configured RE Manager.
@@ -492,14 +491,23 @@ running Grafana.
    `facility`/`instrument` are set in `mouse_bluesky`, during a lab session
    (section 10.2). Measure run counts, refresh latency and what operators
    miss. The schema capture can run in an earlier lab session, before step 3
-   finishes, to correct the fixtures early.
+   finishes, to correct the fixtures early. Also measure the trend's cost on
+   a long run before choosing work budgets (review 06, finding 9).
+   Waiting on (2026-11-17): `mouse_bluesky`'s identity keys deployed on the
+   RE Manager (expected in about a week); a read-only key, which the lab
+   server cannot issue as it runs today (§15); for the Queue panel off the
+   instrument network, read-only HTTP access to the RE Manager
+   ([brief](upstream/brief-mouse-bluesky-queue-http.md)).
 5. **Processing contract** ([processing-runs.md](processing-runs.md)): agreed
    with MoDaCor from step 1 onwards; MoDaCor builds the publisher and watcher.
 6. **Corrected views:** processing lane, related runs, 1D curve, 2D image;
    first against synthetic processing runs, then MoDaCor's real ones.
+   Built against synthetic runs 2026-11-17 (§14); MoDaCor's real runs, and
+   its final field names, are still to come.
 7. **Electrochemistry**, once it writes to Tiled: view-table entries and
    fixtures; no timeline changes expected.
-8. **Customisation:** presets (from `CONFIG_SPEC.md`), lanes per event stream,
+8. **Customisation:** layout (for example the selected run's metadata beside
+   its corrected curve), presets (from `CONFIG_SPEC.md`), lanes per event stream,
    then a custom panel only if version 1 falls short. Tiled's SQL catalogue
    does not support `Regex` queries, so preset regex filters run in the
    adapter; other predicates map to `Eq`, `In`, `NotIn` and `Comparison`, with
@@ -701,7 +709,46 @@ presets in the browser; alerting; raw MOUSE detector frames.
   hints voltage and current, and keeps local tables in SQLite. Its view
   table entry follows (§7). MOUSE: [brief](upstream/brief-mouse-bluesky.md).
 
+- Since review 05 (2026-11-16 to 2026-11-17): time-series fields in other
+  units on a second axis; a *Run metadata* panel (the selected run's start
+  and stop documents, bounded); a trend of the selected time series over
+  earlier runs like it (same lane, role and `plan_name`, gaps between runs,
+  one point budget); the timeline padded to at least four lanes; the
+  dashboard grouped into collapsible rows; time-series views for MOUSE
+  measurements in the view table (§7); test servers on SQLite tables only
+  (no DuckDB, which failed concurrent reads). `mouse_bluesky` has committed
+  the identity keys (not yet deployed); its queue brief asks for read-only
+  HTTP access.
+- Informal look at the lab Tiled, 2026-11-17, with the server's only key
+  kept on the developer's machine: 445 runs in a 2-day window in 0.6 s,
+  4,023 in 14 days in 2.3 s, 60 days truncated at 10,000 runs; a trend over
+  52 runs in 2.9 s cold, 0.5 s cached; no panel errors. MOUSE runs have no
+  `instrument` yet, so all sit on the "(unknown)" lane. Grafana 13.3.1's
+  show/hide rules need dynamic dashboards (schema v2), whose file
+  provisioning is still experimental: left for step 8.
+- Step 6 against synthetic processing runs, 2026-11-17: `/related` (a
+  measurement's processing runs with the latest attempt and latest usable
+  result per family, or a processing run's measurements), `/curve` and
+  `/image` (a PNG rendered in the adapter, also at `/run-images/...` for the
+  proxy). A selected measurement shows its latest usable result. View table:
+  `corrected_curve` and `corrected_image` for MOUSE processing runs. A
+  *Corrected data* row on the dashboard (D-009). Found: Tiled 0.2.21's `Eq`
+  with a list fails on SQLite, so related runs are found with `Like` and
+  checked exactly (D-008).
+
 ## 15. Open questions
 
-None at the moment. Step 3 built and reviewed 2026-11-16; next: the
-operator trial (step 4) in a lab session.
+1. **The lab Tiled is not what §14 records.** On 2026-11-17 it reported
+   version 0.2.7 in single-user mode (authentication required, no
+   providers, no `/auth/whoami`), and it was reachable over HTTPS from the
+   development machine, not only from the lab network. Its one key carries
+   write rights, so the adapter has no read-only credential (§6) and
+   `ett-check-access` cannot prove one (D-005). Needed from the maintainer:
+   multi-user mode with a scoped key for the adapter (and, with it, the
+   catalogue migrations up to the demo's 0.2.21, §10.2), or another way to
+   a read-only credential; and whether §14's network statement still holds.
+
+Review 06 of the work since review 05 and of step 6 folded in 2026-11-17
+([disposition](reviews/disposition-06.md)); its finding 9 (bounding the
+trend's work) is a step 4 item. Next: step 8 while step 4 waits; step 6
+against MoDaCor's real runs when they exist.

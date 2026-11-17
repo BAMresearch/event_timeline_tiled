@@ -95,6 +95,9 @@ _HTTP_STATUS = {
     401: HealthStatus.UNAUTHORISED,
     403: HealthStatus.FORBIDDEN,
     404: HealthStatus.NOT_FOUND,
+    # Gone: Tiled's answer to a broken link. (A registered HDF5 file that has
+    # gone missing gives 500 in Tiled 0.2.21, not 410: review 06, finding 15.)
+    410: HealthStatus.NOT_FOUND,
 }
 
 
@@ -208,6 +211,26 @@ class TiledReader:
             if not paging:
                 raise SourceError(HealthStatus.ERROR, "next link without paging parameters")
             params = {k: v for k, v in params.items() if not k.startswith("page[")} | paging
+
+    def get_bytes(self, path: str, params: dict[str, Any], max_bytes: int) -> bytes:
+        """GET ``/api/v1{path}`` as a binary body of at most ``max_bytes``, or raise
+        :class:`SourceError`. The body is read in pieces and refused once it is
+        too long, so a wrong size estimate cannot exhaust memory."""
+        try:
+            with self._http.stream("GET", path, params=params) as response:
+                if response.status_code != 200:
+                    status = _HTTP_STATUS.get(response.status_code, HealthStatus.ERROR)
+                    raise SourceError(status, f"HTTP {response.status_code}")
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    body += chunk
+                    if len(body) > max_bytes:
+                        raise SourceError(HealthStatus.ERROR, "response larger than expected")
+                return bytes(body)
+        except httpx.TransportError as exc:
+            raise SourceError(HealthStatus.UNREACHABLE, type(exc).__name__) from None
+        except httpx.HTTPError as exc:
+            raise SourceError(HealthStatus.ERROR, type(exc).__name__) from None
 
     def table_columns(self, path: str, columns: Sequence[str]) -> dict[str, list[Any]]:
         """Whole columns of a table node (Tiled cannot select rows)."""

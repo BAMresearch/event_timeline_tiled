@@ -136,3 +136,62 @@ def test_fallback_without_hints_takes_the_first_stream_but_baseline() -> None:
     assert (views[0].name, views[0].streams) == ("numeric", ("b",))
     only_baseline = resolve(run(), Role.ACQUISITION, plain[:1])
     assert (only_baseline[0].name, only_baseline[0].streams) == ("hinted", ("baseline",))
+
+
+def _array(shape: list[int], **extra: Any) -> dict[str, Any]:
+    return {"dtype": "array", "shape": shape, "external": "STREAM:", **extra}
+
+
+CORRECTED = [
+    stream(
+        "corrected_1d",
+        {
+            "Q": _array([100], units="1/nm"),
+            "I": _array([100], units="1/(m sr)"),
+            "I_uncertainty": _array([100], uncertainty_of="I"),
+        },
+    ),
+    stream("corrected_2d", {"image": _array([64, 32])}),
+]
+
+
+def test_mouse_processing_run_has_curve_and_image() -> None:
+    views = resolve(run(instrument="MOUSE", kind="modacor_correction"), Role.PROCESSING, CORRECTED)
+    assert [(v.name, v.kind, v.available) for v in views] == [
+        ("corrected_curve", ViewKind.CURVE, True),
+        ("corrected_image", ViewKind.IMAGE, True),
+        ("summary", ViewKind.SUMMARY, True),
+    ]
+    curve, image = views[0], views[1]
+    # x, y, then the uncertainty of y the stream declares.
+    assert curve.fields == ("Q", "I", "I_uncertainty")
+    assert dict(curve.units) == {"Q": "1/nm", "I": "1/(m sr)"}
+    assert (image.streams, image.fields) == (("corrected_2d",), ("image",))
+
+
+def test_processing_run_without_an_image_still_has_its_curve() -> None:
+    views = resolve(run(instrument="MOUSE"), Role.PROCESSING, CORRECTED[:1])
+    assert [(v.name, v.available) for v in views] == [
+        ("corrected_curve", True),
+        ("summary", True),
+        ("corrected_image", False),
+    ]
+    assert views[2].reason == "this run has no corrected_2d"
+
+
+def test_array_views_need_arrays_of_the_right_rank() -> None:
+    scalar = [stream("corrected_1d", {"Q": NUM, "I": _array([5])})]
+    # Neither curve nor image: the processing rule does not apply; the fallback does.
+    views = resolve(run(instrument="MOUSE"), Role.PROCESSING, scalar)
+    assert views[0].name == "numeric"
+    flat = [stream("corrected_2d", {"image": _array([5])})]
+    assert resolve(run(instrument="MOUSE"), Role.PROCESSING, flat)[0].name == "no_data"
+
+
+def test_array_views_name_their_fields() -> None:
+    with pytest.raises(ValueError, match="names 2 fields"):
+        ViewSpec("c", "C", ViewKind.CURVE, ("s",), fields=("x",))
+    with pytest.raises(ValueError, match="exactly one stream"):
+        ViewSpec("i", "I", ViewKind.IMAGE, ("a", "b"), fields=("image",))
+    with pytest.raises(ValueError, match="names 0 fields"):
+        ViewSpec("t", "T", ViewKind.TABLE, ("s",), fields=("x",))

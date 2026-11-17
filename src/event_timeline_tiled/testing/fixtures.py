@@ -128,6 +128,20 @@ class FixtureWriter:
 
         return self._write_captured(plan(), start, stop, exit_status)
 
+    def unit_run(
+        self, md: dict[str, Any], start: float, stop: float, *, units: str, value: float
+    ) -> str:
+        """A generic run of three readings of ``reading`` (hinted, in ``units``,
+        always ``value``) in ``primary``."""
+        reading = _UnitSignal(func=lambda: value, name="reading", units=units, kind="hinted")
+
+        @bpp.run_decorator(md=md)
+        def plan() -> Iterator[Any]:
+            for _ in range(3):
+                yield from bps.trigger_and_read([reading], name="primary")
+
+        return self._write_captured(plan(), start, stop, "success")
+
     def shared_field_run(self, md: dict[str, Any], start: float, stop: float) -> str:
         """A MOUSE-like run whose ``snapshot`` and ``mouse_eiger_measure`` streams
         both have a field ``shared``, in volts and amperes respectively."""
@@ -307,8 +321,10 @@ class FixtureWriter:
         attempt: int = 1,
         reason: str | None = None,
         partial: bool = False,
+        uncertainty: Sequence[float] | None = None,
     ) -> str:
         """A processing run per the draft contract (processing-runs.md §1, §1.1).
+        ``uncertainty`` replaces the curve's (5 % of I), point by point.
 
         ``with_outputs=False`` publishes nothing: with ``success`` that is the
         contract's "nothing to do" case, so a ``reason`` is required. A failed
@@ -340,9 +356,11 @@ class FixtureWriter:
         published: list[str] = []
         if partial:
             # Only part of the product was published: no product counts as published.
-            docs += self._outputs(bundle, (stop or start + 60.0) - 1.0, streams=("corrected_1d",))
+            docs += self._outputs(
+                bundle, (stop or start + 60.0) - 1.0, ("corrected_1d",), uncertainty
+            )
         elif with_outputs:
-            docs += self._outputs(bundle, (stop or start + 60.0) - 1.0)
+            docs += self._outputs(bundle, (stop or start + 60.0) - 1.0, uncertainty=uncertainty)
             published = [PROCESSING_PRODUCT]
         if stop is not None:
             if reason is None:
@@ -357,7 +375,11 @@ class FixtureWriter:
         return str(bundle.start_doc["uid"])
 
     def _outputs(
-        self, bundle: Any, t: float, streams: Sequence[str] = ("corrected_1d", "corrected_2d")
+        self,
+        bundle: Any,
+        t: float,
+        streams: Sequence[str] = ("corrected_1d", "corrected_2d"),
+        uncertainty: Sequence[float] | None = None,
     ) -> list[Doc]:
         n = self.outputs.curve_points
         h, w = self.outputs.image_shape
@@ -369,7 +391,8 @@ class FixtureWriter:
         with H5File(path, "w") as f:
             f["Q"] = q[None]
             f["I"] = intensity[None]
-            f["I_uncertainty"] = (0.05 * intensity)[None]
+            sigma = 0.05 * intensity if uncertainty is None else np.asarray(uncertainty, "<f4")
+            f["I_uncertainty"] = sigma[None]
             f["image"] = image[None]
         uri = f"file://localhost{path.resolve()}"
         # field: (shape, chunks, units, extra data-key metadata)

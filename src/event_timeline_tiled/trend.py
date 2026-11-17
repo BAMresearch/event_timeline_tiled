@@ -2,8 +2,9 @@
 
 Which runs belong in a trend, and reading them, is the adapter's job; this
 module only turns their events into long rows (time in ms, field, series,
-value) within a row limit, with a gap between runs so that a line is never
-drawn across the time between two runs.
+value) within a row limit, with a gap row (null values) halfway between
+consecutive runs, where Grafana breaks the line. Runs less than 2 ms apart
+get no gap, and runs that overlap in time interleave (review 06).
 """
 
 from __future__ import annotations

@@ -160,9 +160,11 @@ def test_generic_fallback_time_series(api: tuple[TestClient, dict[str, Any]]) ->
     assert set(data["rows"][0]) == {"time", "field", "series", "value"}
 
 
-def test_processing_run_has_no_plottable_data_yet(api: tuple[TestClient, dict[str, Any]]) -> None:
+def test_processing_run_without_outputs_has_no_plottable_data(
+    api: tuple[TestClient, dict[str, Any]],
+) -> None:
     client, manifest = api
-    views = client.get(f"/runs/{manifest['runs']['proc_inside_ok']['uid']}/views").json()
+    views = client.get(f"/runs/{manifest['runs']['proc_inside_failed']['uid']}/views").json()
     assert views["default"] == "summary"
     assert views["views"][0] == {**views["views"][0], "name": "no_data", "available": False}
 

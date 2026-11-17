@@ -856,6 +856,30 @@
         "value": "\u2013"
        }
       ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "y_lower"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "y_upper"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
      }
     ]
    }
@@ -1547,7 +1571,7 @@
   },
   {
    "type": "row",
-   "title": "Trend: runs like the selected one",
+   "title": "Corrected data",
    "collapsed": false,
    "panels": [],
    "gridPos": {
@@ -1563,6 +1587,631 @@
    "gridPos": {
     "x": 0,
     "y": 31,
+    "w": 24,
+    "h": 2
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "table",
+     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&max_points=2000",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "",
+     "columns": [
+      {
+       "selector": "notice",
+       "text": "notice",
+       "type": "string"
+      }
+     ]
+    }
+   ],
+   "transparent": true,
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "/^notice$/",
+     "values": false
+    },
+    "colorMode": "none",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "auto",
+    "text": {
+     "valueSize": 14
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "\u2013"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "xychart",
+   "title": "Corrected curve",
+   "gridPos": {
+    "x": 0,
+    "y": 33,
+    "w": 12,
+    "h": 9
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "table",
+     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&max_points=2000",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "rows",
+     "columns": [
+      {
+       "selector": "x",
+       "text": "x",
+       "type": "number"
+      },
+      {
+       "selector": "y",
+       "text": "y",
+       "type": "number"
+      },
+      {
+       "selector": "y_lower",
+       "text": "y_lower",
+       "type": "number"
+      },
+      {
+       "selector": "y_upper",
+       "text": "y_upper",
+       "type": "number"
+      }
+     ]
+    }
+   ],
+   "description": "The curve view of the selected processing run, or of the selected measurement's latest usable processing result, on log\u2013log axes. The bounds are y \u2213 its uncertainty. Names and units are in the line above.",
+   "options": {
+    "mapping": "auto",
+    "series": [
+     {
+      "x": {
+       "matcher": {
+        "id": "byName",
+        "options": "x"
+       }
+      }
+     }
+    ],
+    "legend": {
+     "showLegend": true,
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "nothing to plot (see the line above)",
+     "unit": "sci",
+     "custom": {
+      "show": "lines",
+      "lineWidth": 1,
+      "scaleDistribution": {
+       "type": "log",
+       "log": 10
+      }
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "y"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "corrected"
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "blue"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "y_lower"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "lower bound (\u2212\u03c3)"
+       },
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          4,
+          4
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "gray"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "y_upper"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "upper bound (+\u03c3)"
+       },
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          4,
+          4
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "gray"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "type": "text",
+   "title": "Corrected image",
+   "gridPos": {
+    "x": 12,
+    "y": 33,
+    "w": 12,
+    "h": 9
+   },
+   "description": "The image view of the selected processing run, or of the selected measurement's latest usable processing result: log scale, colours from the 1st to the 99.5th percentile, zero and negative values transparent.",
+   "options": {
+    "mode": "html",
+    "content": "<img src=\"/run-images/${run:percentencode}/image?size=768&t=${__to}\" alt=\"No corrected image for the selected run (see the line above the curve)\" style=\"display:block;margin:auto;max-width:100%;max-height:calc(100% - 1.6em)\"><p style=\"text-align:center;margin:0.2em 0 0;opacity:0.7\">The same result as the curve: named in the line above it.</p>"
+   }
+  },
+  {
+   "type": "table",
+   "title": "Related runs",
+   "gridPos": {
+    "x": 0,
+    "y": 42,
+    "w": 24,
+    "h": 5
+   },
+   "datasource": {
+    "type": "yesoreyeram-infinity-datasource",
+    "uid": "timeline-adapter"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "yesoreyeram-infinity-datasource",
+      "uid": "timeline-adapter"
+     },
+     "type": "json",
+     "source": "url",
+     "parser": "backend",
+     "format": "table",
+     "url": "http://adapter:8000/selection/related?uid=${run:percentencode}",
+     "url_options": {
+      "method": "GET",
+      "data": ""
+     },
+     "root_selector": "rows",
+     "columns": [
+      {
+       "selector": "relation",
+       "text": "relation",
+       "type": "string"
+      },
+      {
+       "selector": "label",
+       "text": "label",
+       "type": "string"
+      },
+      {
+       "selector": "family",
+       "text": "family",
+       "type": "string"
+      },
+      {
+       "selector": "attempt",
+       "text": "attempt",
+       "type": "number"
+      },
+      {
+       "selector": "mark",
+       "text": "mark",
+       "type": "string"
+      },
+      {
+       "selector": "problems",
+       "text": "problems",
+       "type": "string"
+      },
+      {
+       "selector": "status",
+       "text": "status",
+       "type": "string"
+      },
+      {
+       "selector": "usable",
+       "text": "usable",
+       "type": "boolean"
+      },
+      {
+       "selector": "start",
+       "text": "start",
+       "type": "timestamp_epoch_s"
+      },
+      {
+       "selector": "reason",
+       "text": "reason",
+       "type": "string"
+      },
+      {
+       "selector": "uid",
+       "text": "uid",
+       "type": "string"
+      }
+     ]
+    }
+   ],
+   "description": "A measurement's processing runs (the latest attempt and the latest usable result marked per family), or a processing run's measurements.",
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": [
+     {
+      "displayName": "start",
+      "desc": true
+     }
+    ]
+   },
+   "fieldConfig": {
+    "defaults": {
+     "noValue": "no related runs"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "uid"
+      },
+      "properties": [
+       {
+        "id": "custom.hidden",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "label"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "Select run",
+          "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&${__url_time_range}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "status"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "success": {
+            "color": "green",
+            "index": 0
+           },
+           "failed": {
+            "color": "red",
+            "index": 1
+           },
+           "aborted": {
+            "color": "orange",
+            "index": 2
+           },
+           "unknown": {
+            "color": "purple",
+            "index": 3
+           },
+           "open": {
+            "color": "blue",
+            "index": 4
+           },
+           "possibly stalled": {
+            "color": "yellow",
+            "index": 5
+           },
+           "activity unknown": {
+            "color": "light-blue",
+            "index": 6
+           },
+           "stale": {
+            "color": "gray",
+            "index": 7
+           }
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "relation"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 105
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "attempt"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "status"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 80
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "usable"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 75
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "mark"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 220
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "start"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 160
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "family"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "attempt"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "mark"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "problems"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "status"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "usable"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "start"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "reason"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "type": "row",
+   "title": "Trend: runs like the selected one",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 47,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "type": "stat",
+   "title": "",
+   "gridPos": {
+    "x": 0,
+    "y": 48,
     "w": 24,
     "h": 2
    },
@@ -1625,7 +2274,7 @@
    "title": "Trend: the selected run and the runs like it in range",
    "gridPos": {
     "x": 0,
-    "y": 33,
+    "y": 50,
     "w": 24,
     "h": 8
    },
@@ -1756,7 +2405,7 @@
    "panels": [],
    "gridPos": {
     "x": 0,
-    "y": 41,
+    "y": 58,
     "w": 24,
     "h": 1
    }
@@ -1766,7 +2415,7 @@
    "title": "Run metadata",
    "gridPos": {
     "x": 0,
-    "y": 42,
+    "y": 59,
     "w": 24,
     "h": 10
    },
@@ -1877,7 +2526,7 @@
    "collapsed": true,
    "gridPos": {
     "x": 0,
-    "y": 52,
+    "y": 69,
     "w": 24,
     "h": 1
    },
@@ -1887,7 +2536,7 @@
      "title": "Fields of ${stream}",
      "gridPos": {
       "x": 0,
-      "y": 53,
+      "y": 70,
       "w": 24,
       "h": 8
      },
