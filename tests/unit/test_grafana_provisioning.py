@@ -28,6 +28,8 @@ ENDPOINTS = {
     "/selection/trend",
     "/selection/related",
     "/selection/curve",
+    "/presets",
+    "/selection/runs",
 }
 
 
@@ -229,10 +231,47 @@ def test_timeline_dashboard_is_what_the_generator_writes() -> None:
         assert spec and spec.loader
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        written = module.render(module.dashboard())
+        written = {name: module.render(build()) for name, build in module.GENERATED.items()}
     finally:
         sys.path.remove(str(generator))
-    assert written == (GRAFANA / "dashboards" / "timeline.json").read_text(), (
-        "timeline.json differs from the generator's output: run `uv run --locked python "
-        "grafana/generator`"
+    for name, text in written.items():
+        assert text == (GRAFANA / "dashboards" / name).read_text(), (
+            f"{name} differs from the generator's output: run `uv run --locked python "
+            "grafana/generator`"
+        )
+
+
+def test_the_preset_picker_and_the_selection_state() -> None:
+    """presets.md §11: an Infinity query variable on /presets (backend parser,
+    title shown, id sent), and the hidden, URL-synced selection variables."""
+    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
+    variables = {v["name"]: v for v in timeline["templating"]["list"]}
+    assert list(variables) == ["preset", "run", "root", "lane", "unfold", "stream"]
+    picker = variables["preset"]
+    assert picker["type"] == "query" and picker["query"]["queryType"] == "infinity"
+    assert picker["query"]["infinityQuery"]["parser"] == "backend"
+    assert picker["query"]["meta"] == {"textField": "title", "valueField": "id"}
+    assert not picker["multi"] and not picker["includeAll"] and not picker["skipUrlSync"]
+    assert all(variables[n]["hide"] == 2 for n in ("run", "root", "lane", "unfold", "stream"))
+
+
+def test_every_navigation_sets_each_variable_once() -> None:
+    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
+    urls = [n["url"] for n in _walk(timeline)
+            if "url" in n and str(n["url"]).startswith("/d/") and "?" in str(n["url"])]  # fmt: skip
+    assert len(urls) >= 6
+    # The top bar's links to the other timeline dashboards carry everything.
+    for other in timeline["links"]:
+        assert other["includeVars"] and other["keepTime"] and other["url"] == "/d/ett-overview"
+    for url in urls:
+        for name in ("run", "root", "lane", "preset", "unfold", "stream"):
+            count = url.count(f"var-{name}=") + url.count(f"${{{name}:queryparam}}")
+            assert count == 1, (name, url)
+        assert url.count("${__url_time_range}") + url.count("from=") == 1, url
+    [frame] = [p for p in _panels(timeline) if p["type"] == "state-timeline"]
+    queries = frame["targets"][0]["url"]
+    assert (
+        "preset=${preset:percentencode}" in queries and "unfold=${unfold:percentencode}" in queries
     )
+    [status] = [p for p in _panels(timeline) if p["title"] == "Data status"]
+    assert "unfold=${unfold:percentencode}" in status["targets"][0]["url"]

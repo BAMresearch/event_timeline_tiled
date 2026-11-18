@@ -5,8 +5,9 @@ and how clips are labelled. This page is the reference for writing one. The
 design and its reasons are in [presets and layout](../design/presets.md).
 
 **Status:** presets decide the adapter's lanes (`preset=<id>` on the
-endpoints, [endpoints](endpoints.md)); the dashboard picker and unfolding a
-lane into streams follow in the next part of step 8.
+endpoints, [endpoints](endpoints.md)) and are chosen with the *Preset* picker
+on the Timeline and Overview dashboards. A lane can be unfolded into its
+streams there.
 
 ## Files
 
@@ -14,8 +15,12 @@ One preset per file, `*.yaml` or `*.yml`, in the directory `ETT_PRESETS_DIR`
 names (in the stack: `deploy/presets/`, or the host directory `ETT_PRESETS`
 in `deploy/.env` names). `ETT_DEFAULT_PRESET` chooses the preset used when a
 request names none. Budgets: `ETT_MAX_LANES` (100), `ETT_MAX_SUBLANES` (200)
-and `ETT_MAX_PLACEMENTS` (20,000) per frame; more is left out and reported. All files are loaded at start; one bad file stops the adapter with its
-file name, line, column and the path of the problem (`tracks[1].where.op`).
+and `ETT_MAX_PLACEMENTS` (20,000) per frame; more is left out and reported.
+Unfolding a lane: `ETT_UNFOLD_MAX_RUNS` (50), `ETT_UNFOLD_MAX_STREAMS` (16),
+`ETT_UNFOLD_MAX_EVENTS` (200,000), `ETT_UNFOLD_TIME_S` (10) and
+`ETT_UNFOLD_REVALIDATE_S` (0: finished runs are not re-read). All files are
+loaded at start; one bad file stops the adapter with its file name, line,
+column and the path of the problem (`tracks[1].where.op`).
 The package ships one preset, `instruments` (one lane per instrument and
 role): its id is reserved, so copy it under another id to change it.
 

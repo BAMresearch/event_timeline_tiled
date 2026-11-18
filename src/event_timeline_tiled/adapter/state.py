@@ -61,7 +61,7 @@ class Adapter:
 
     def root(self, root: str | None) -> str | None:
         """A configured root from a request (``/`` is the server root), or 422."""
-        if root is None:
+        if not root:
             return None
         value = root.strip("/")
         if value not in self.timeline.roots:

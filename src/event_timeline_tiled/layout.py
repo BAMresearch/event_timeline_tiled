@@ -35,6 +35,7 @@ import json
 import math
 import re
 from collections.abc import Mapping, Sequence
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
@@ -144,6 +145,37 @@ class RunRecord:
         return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+class StreamState(StrEnum):
+    """What a stream's event times say (presets.md §6.5)."""
+
+    DRAWN = "drawn"
+    """Finite event times: an extent from the first to the last."""
+    EMPTY = "empty"
+    """No events (declared zero, or a finished run without a table)."""
+    PENDING = "pending"
+    """An open run's stream before its first rows reach Tiled."""
+    INVALID = "invalid"
+    """Rows, but no finite event time."""
+    UNREADABLE = "unreadable"
+    """The read failed, or fewer rows than the stop document reports."""
+    REFUSED = "refused"
+    """Over a read budget: not read, or not read completely."""
+
+
+@frozen
+class StreamExtent:
+    stream: str
+    state: StreamState
+    first: float | None = None
+    last: float | None = None
+    rows: int | None = None
+    detail: str = ""
+
+
+BYTES_PER_EVENT = 40
+"""A generous size of one event time in Tiled's JSON table response."""
+
+
 @frozen
 class ArrayInfo:
     """One result of an external array: its shape (without the leading result
@@ -158,7 +190,10 @@ class StreamInfo:
     name: str
     data_keys: Mapping[str, Mapping[str, Any]]
     hints: tuple[str, ...]
-    has_table: bool
+    has_scalar_fields: bool
+    """The stream has fields that are not external arrays: it can have a table
+    of values. It says nothing about whether that table exists yet; every
+    stream, external-only ones included, has ``seq_num`` and ``time`` rows."""
 
 
 def _record(root: str, item: Mapping[str, Any]) -> RunRecord | None:
@@ -363,7 +398,7 @@ class Layout:
                     name=name,
                     data_keys={k: v for k, v in data_keys.items() if isinstance(v, Mapping)},
                     hints=tuple(hinted),
-                    has_table=any(not _is_external(v) for v in data_keys.values()),
+                    has_scalar_fields=any(not _is_external(v) for v in data_keys.values()),
                 )
             )
         return sorted(out, key=lambda s: s.name)
@@ -399,13 +434,65 @@ class Layout:
             return tuple(sorted(counts))
         return tuple(sorted(s.name for s in self.streams(run)))
 
+    def stream_extent(self, run: RunRecord, stream: str, max_events: int) -> StreamExtent:
+        """The earliest and latest event time of one stream, from its ``time``
+        column only (unsorted; Tiled cannot select rows or reduce them). Any
+        stream qualifies, external-only ones included. A closed run's declared
+        count refuses an oversized stream before reading; an open stream's
+        transfer stops at the budget."""
+        declared = run.num_events(stream)
+        if declared == 0:
+            return StreamExtent(stream, StreamState.EMPTY, rows=0)
+        if declared is not None and declared > max_events:
+            return StreamExtent(stream, StreamState.REFUSED, rows=declared,
+                                detail=f"{declared} events, more than {max_events}")  # fmt: skip
+        try:
+            times = self.reader.table_column(
+                f"{run.path}/{stream}/{TABLE}", "time", max_events * BYTES_PER_EVENT + 1024
+            )
+        except SourceError as exc:
+            if exc.status is HealthStatus.NOT_FOUND:
+                if run.stop is None:
+                    return StreamExtent(stream, StreamState.PENDING)
+                if declared:
+                    return StreamExtent(stream, StreamState.UNREADABLE, rows=0,
+                                        detail="reports events but has no table")  # fmt: skip
+                return StreamExtent(stream, StreamState.EMPTY, rows=0)
+            if exc.detail == "response larger than expected":
+                return StreamExtent(stream, StreamState.REFUSED,
+                                    detail=f"more than {max_events} events")  # fmt: skip
+            return StreamExtent(stream, StreamState.UNREADABLE, detail=str(exc))
+        if run.stop is not None and declared is not None and len(times) != declared:
+            return StreamExtent(stream, StreamState.UNREADABLE, rows=len(times),
+                                detail=f"{len(times)} of {declared} rows")  # fmt: skip
+        finite = [t for t in (_finite(v) for v in times) if t is not None]
+        if not times:
+            state = StreamState.PENDING if run.stop is None else StreamState.EMPTY
+            return StreamExtent(stream, state, rows=0)
+        if not finite:
+            return StreamExtent(stream, StreamState.INVALID, rows=len(times))
+        return StreamExtent(stream, StreamState.DRAWN, min(finite), max(finite), len(times))
+
+    def stream_extents(
+        self, run: RunRecord, max_streams: int, max_events: int
+    ) -> tuple[StreamExtent, ...]:
+        """Every stream's extent (:meth:`stream_extent`), in name order; streams
+        beyond ``max_streams`` are refused without reading."""
+        names = self.stream_names(run)
+        return tuple(
+            self.stream_extent(run, name, max_events)
+            if i < max_streams
+            else StreamExtent(name, StreamState.REFUSED, detail=f"more than {max_streams} streams")
+            for i, name in enumerate(names)
+        )
+
     def open_run_reading(self, run: RunRecord) -> tuple[float | None, tuple[str, ...]]:
         """An open run's latest event time (as :meth:`last_event_time`) and its
         stream names, from one listing of its streams."""
         latest: float | None = None
         streams = self.streams(run)
         for stream in streams:
-            if not stream.has_table:
+            if not stream.has_scalar_fields:
                 continue
             column = self._table_columns(run, stream.name, ["time"])
             for t in (_finite(v) for v in column["time"]):

@@ -22,7 +22,7 @@ browser ──► proxy (nginx) ──► Grafana ──► Infinity data source
 | Access check | `src/event_timeline_tiled/access_check.py` | `ett-check-access`: read-only check of the adapter's key ([Tiled access](tiled-access.md)) |
 | Settings | `src/event_timeline_tiled/settings.py` | `ETT_*` environment variables, validated at start-up |
 | Fixtures | `src/event_timeline_tiled/testing/` | Synthetic runs for tests and the demo stack (`testing` extra) |
-| Grafana | `grafana/` | Provisioned data source and dashboards; `grafana/generator/` builds `timeline.json`, one function per row ([development](development.md#dashboards)) |
+| Grafana | `grafana/` | Provisioned data source and dashboards; `grafana/generator/` builds `timeline.json` and `overview.json` from shared panels ([development](development.md#dashboards)) |
 | Containers | `deploy/` | Compose file, Dockerfiles, proxy and demo-Tiled configuration |
 
 Design background: [plan](../design/plan.md),

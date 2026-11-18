@@ -85,7 +85,7 @@ def test_streams_and_event_columns(catalog_server: Server) -> None:
     streams = {s.name: s for s in layout.streams(run)}
     assert sorted(streams) == ["baseline", "mouse_eiger_measure", "snapshot"]
     measure = streams["mouse_eiger_measure"]
-    assert {"roi", "stats"} <= set(measure.data_keys) and measure.has_table
+    assert {"roi", "stats"} <= set(measure.data_keys) and measure.has_scalar_fields
     columns = layout.event_columns(run, "mouse_eiger_measure", ["roi"])
     assert columns["seq_num"] == [1, 2, 3] and len(columns["roi"]) == 3
     assert run.num_events("mouse_eiger_measure") == 3
@@ -105,7 +105,7 @@ def test_processing_streams_have_no_table(catalog_server: Server) -> None:
     layout = _layout(server)
     run = layout.find_run([""], _cases(manifest)["proc_inside_ok"]["uid"])
     assert run is not None
-    assert {s.name: s.has_table for s in layout.streams(run)} == {
+    assert {s.name: s.has_scalar_fields for s in layout.streams(run)} == {
         "corrected_1d": False,
         "corrected_2d": False,
     }

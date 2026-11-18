@@ -16,8 +16,43 @@ DS = {"type": "yesoreyeram-infinity-datasource", "uid": "timeline-adapter"}
 ADAPTER = "http://adapter:8000"
 RANGE = "from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}"
 """The dashboard's time range in epoch seconds, as the adapter takes it."""
-RUN = "uid=${run:percentencode}"
-"""The selected run, as a query parameter (may be empty)."""
+RUN = "uid=${run:percentencode}&root=${root:percentencode}"
+"""The selected run and its catalogue root, as query parameters (may be empty)."""
+PRESET = "preset=${preset:percentencode}"
+"""The chosen preset (presets.md §11)."""
+SELECTION = ("run", "root", "lane", "preset", "unfold", "stream")
+"""The dashboard state every navigation carries (presets.md §11)."""
+
+
+def field(name: str) -> str:
+    """A clicked row's field, percent-encoded for a URL."""
+    return f'${{__data.fields["{name}"]:percentencode}}'
+
+
+def nav(dashboard: str, changes: dict[str, str], time: str = "${__url_time_range}") -> str:
+    """A link to ``dashboard`` that sets the variables in ``changes`` (``""``
+    clears one) and keeps the others: each variable exactly once (presets.md
+    §11's transition table)."""
+    params = [f"var-{n}={changes[n]}" if n in changes else f"${{{n}:queryparam}}"
+              for n in SELECTION]  # fmt: skip
+    return f"/d/{dashboard}?" + "&".join([*params, time])
+
+
+def preset_variable() -> dict[str, Any]:
+    """The preset picker: an Infinity query variable on ``/presets``, which
+    lists the deployment's default first, so the picker starts there."""
+    query = {key: value for key, value in target(f"{ADAPTER}/presets", "",
+                                                 [col("id"), col("title")]).items()
+             if key not in ("refId", "datasource")}  # fmt: skip
+    return {
+        "name": "preset", "label": "Preset", "type": "query", "datasource": DS,
+        "query": {"queryType": "infinity", "refId": "variable", "infinityQuery": query,
+                  "meta": {"textField": "title", "valueField": "id"}},
+        "refresh": 1, "multi": False, "includeAll": False, "options": [],
+        "current": {}, "hide": 0, "skipUrlSync": False,
+    }  # fmt: skip
+
+
 WIDTH = 24
 """Grafana's grid width."""
 

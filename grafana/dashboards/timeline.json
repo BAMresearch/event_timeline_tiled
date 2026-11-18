@@ -20,10 +20,102 @@
    "5m"
   ]
  },
+ "links": [
+  {
+   "title": "Overview",
+   "type": "link",
+   "url": "/d/ett-overview",
+   "icon": "dashboard",
+   "keepTime": true,
+   "includeVars": true,
+   "targetBlank": false,
+   "tags": [],
+   "asDropdown": false,
+   "tooltip": ""
+  }
+ ],
  "templating": {
   "list": [
    {
+    "name": "preset",
+    "label": "Preset",
+    "type": "query",
+    "datasource": {
+     "type": "yesoreyeram-infinity-datasource",
+     "uid": "timeline-adapter"
+    },
+    "query": {
+     "queryType": "infinity",
+     "refId": "variable",
+     "infinityQuery": {
+      "type": "json",
+      "source": "url",
+      "parser": "backend",
+      "format": "table",
+      "url": "http://adapter:8000/presets",
+      "url_options": {
+       "method": "GET",
+       "data": ""
+      },
+      "root_selector": "",
+      "columns": [
+       {
+        "selector": "id",
+        "text": "id",
+        "type": "string"
+       },
+       {
+        "selector": "title",
+        "text": "title",
+        "type": "string"
+       }
+      ]
+     },
+     "meta": {
+      "textField": "title",
+      "valueField": "id"
+     }
+    },
+    "refresh": 1,
+    "multi": false,
+    "includeAll": false,
+    "options": [],
+    "current": {},
+    "hide": 0,
+    "skipUrlSync": false
+   },
+   {
     "name": "run",
+    "type": "textbox",
+    "hide": 2,
+    "query": "",
+    "current": {
+     "text": "",
+     "value": ""
+    }
+   },
+   {
+    "name": "root",
+    "type": "textbox",
+    "hide": 2,
+    "query": "",
+    "current": {
+     "text": "",
+     "value": ""
+    }
+   },
+   {
+    "name": "lane",
+    "type": "textbox",
+    "hide": 2,
+    "query": "",
+    "current": {
+     "text": "",
+     "value": ""
+    }
+   },
+   {
+    "name": "unfold",
     "type": "textbox",
     "hide": 2,
     "query": "",
@@ -57,7 +149,7 @@
    "transparent": true,
    "options": {
     "mode": "markdown",
-    "content": "**Recorded runs from Tiled.** Click a run to select it. Green success \u00b7 red failed \u00b7 orange aborted \u00b7 blue open \u00b7 yellow possibly stalled \u00b7 light blue activity unknown \u00b7 grey stale. [Health](/d/ett-health/timeline-health)"
+    "content": "**Recorded runs from Tiled.** Click a run to select or unfold its lane. Green success \u00b7 red failed \u00b7 orange aborted \u00b7 blue open \u00b7 yellow possibly stalled \u00b7 light blue activity unknown \u00b7 grey stale. [Fold](/d/ett-timeline?${run:queryparam}&${root:queryparam}&${lane:queryparam}&${preset:queryparam}&var-unfold=&${stream:queryparam}&${__url_time_range}) \u00b7 [Health](/d/ett-health/timeline-health)"
    }
   },
   {
@@ -398,7 +490,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/clips/status?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}",
+     "url": "http://adapter:8000/clips/status?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&unfold=${unfold:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -530,7 +622,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/clips?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}",
+     "url": "http://adapter:8000/clips?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -555,6 +647,16 @@
       {
        "selector": "uid",
        "text": "uid",
+       "type": "string"
+      },
+      {
+       "selector": "root",
+       "text": "root",
+       "type": "string"
+      },
+      {
+       "selector": "lane_key",
+       "text": "lane_key",
        "type": "string"
       }
      ]
@@ -587,6 +689,30 @@
      {
       "matcher": {
        "id": "byName",
+       "options": "root"
+      },
+      "properties": [
+       {
+        "id": "custom.hidden",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "lane_key"
+      },
+      "properties": [
+       {
+        "id": "custom.hidden",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
        "options": "label"
       },
       "properties": [
@@ -595,7 +721,7 @@
         "value": [
          {
           "title": "Select run",
-          "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&${__url_time_range}"
+          "url": "/d/ett-timeline?var-run=${__data.fields[\"uid\"]:percentencode}&var-root=${__data.fields[\"root\"]:percentencode}&var-lane=${__data.fields[\"lane_key\"]:percentencode}&${preset:queryparam}&${unfold:queryparam}&var-stream=&${__url_time_range}"
          }
         ]
        }
@@ -684,7 +810,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/clips?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&status=failed,aborted",
+     "url": "http://adapter:8000/clips?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&status=failed,aborted",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -709,6 +835,16 @@
       {
        "selector": "uid",
        "text": "uid",
+       "type": "string"
+      },
+      {
+       "selector": "root",
+       "text": "root",
+       "type": "string"
+      },
+      {
+       "selector": "lane_key",
+       "text": "lane_key",
        "type": "string"
       }
      ]
@@ -743,6 +879,30 @@
      {
       "matcher": {
        "id": "byName",
+       "options": "root"
+      },
+      "properties": [
+       {
+        "id": "custom.hidden",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "lane_key"
+      },
+      "properties": [
+       {
+        "id": "custom.hidden",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
        "options": "label"
       },
       "properties": [
@@ -751,7 +911,7 @@
         "value": [
          {
           "title": "Select run",
-          "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&${__url_time_range}"
+          "url": "/d/ett-timeline?var-run=${__data.fields[\"uid\"]:percentencode}&var-root=${__data.fields[\"root\"]:percentencode}&var-lane=${__data.fields[\"lane_key\"]:percentencode}&${preset:queryparam}&${unfold:queryparam}&var-stream=&${__url_time_range}"
          }
         ]
        }
@@ -796,7 +956,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -859,7 +1019,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1023,7 +1183,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}",
+     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1043,8 +1203,10 @@
      ]
     }
    ],
+   "description": "The selected run's state: status, duration, reason, activity.",
    "options": {
-    "showHeader": false
+    "showHeader": false,
+    "cellHeight": "sm"
    },
    "fieldConfig": {
     "defaults": {},
@@ -1088,7 +1250,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/streams?uid=${run:percentencode}",
+     "url": "http://adapter:8000/selection/streams?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1168,7 +1330,7 @@
         "value": [
          {
           "title": "Show fields (below the timeline)",
-          "url": "/d/ett-timeline/timeline?${run:queryparam}&var-stream=${__data.fields[\"stream\"]}&${__url_time_range}"
+          "url": "/d/ett-timeline?${run:queryparam}&${root:queryparam}&${lane:queryparam}&${preset:queryparam}&${unfold:queryparam}&var-stream=${__data.fields[\"stream\"]:percentencode}&${__url_time_range}"
          }
         ]
        }
@@ -1201,7 +1363,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&kind=timeseries&max_points=2000&axis=1",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1240,7 +1402,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&kind=timeseries&max_points=2000&axis=2",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&axis=2",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1341,7 +1503,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/clips/frame?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&min_lanes=4",
+     "url": "http://adapter:8000/clips/frame?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&unfold=${unfold:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1417,6 +1579,36 @@
        "selector": "activity_error",
        "text": "activity_error",
        "type": "string"
+      },
+      {
+       "selector": "lane_id",
+       "text": "lane_id",
+       "type": "string"
+      },
+      {
+       "selector": "track",
+       "text": "track",
+       "type": "string"
+      },
+      {
+       "selector": "root",
+       "text": "root",
+       "type": "string"
+      },
+      {
+       "selector": "stream",
+       "text": "stream",
+       "type": "string"
+      },
+      {
+       "selector": "stream_from_ms",
+       "text": "stream_from_ms",
+       "type": "number"
+      },
+      {
+       "selector": "stream_to_ms",
+       "text": "stream_to_ms",
+       "type": "number"
       }
      ]
     }
@@ -1500,11 +1692,19 @@
      "links": [
       {
        "title": "Select run",
-       "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&${__url_time_range}"
+       "url": "/d/ett-timeline?var-run=${__data.fields[\"uid\"]:percentencode}&var-root=${__data.fields[\"root\"]:percentencode}&var-lane=${__data.fields[\"lane_id\"]:percentencode}&${preset:queryparam}&${unfold:queryparam}&var-stream=${__data.fields[\"stream\"]:percentencode}&${__url_time_range}"
       },
       {
        "title": "Zoom to run",
-       "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&from=${__data.fields[\"zoom_from_ms\"]}&to=${__data.fields[\"zoom_to_ms\"]}"
+       "url": "/d/ett-timeline?var-run=${__data.fields[\"uid\"]:percentencode}&var-root=${__data.fields[\"root\"]:percentencode}&var-lane=${__data.fields[\"lane_id\"]:percentencode}&${preset:queryparam}&${unfold:queryparam}&var-stream=${__data.fields[\"stream\"]:percentencode}&from=${__data.fields[\"zoom_from_ms\"]}&to=${__data.fields[\"zoom_to_ms\"]}"
+      },
+      {
+       "title": "Unfold lane into streams",
+       "url": "/d/ett-timeline?${run:queryparam}&${root:queryparam}&${lane:queryparam}&${preset:queryparam}&var-unfold=${__data.fields[\"lane_id\"]:percentencode}&${stream:queryparam}&${__url_time_range}"
+      },
+      {
+       "title": "Fold",
+       "url": "/d/ett-timeline?${run:queryparam}&${root:queryparam}&${lane:queryparam}&${preset:queryparam}&var-unfold=&${stream:queryparam}&${__url_time_range}"
       }
      ]
     },
@@ -1656,6 +1856,102 @@
      {
       "matcher": {
        "id": "byName",
+       "options": "lane_id"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "track"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "root"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "stream"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "stream_from_ms"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "stream_to_ms"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": true
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
        "options": "label"
       },
       "properties": [
@@ -1720,7 +2016,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&max_points=2000",
+     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&root=${root:percentencode}&max_points=2000",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1783,7 +2079,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&max_points=2000",
+     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&root=${root:percentencode}&max_points=2000",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1945,7 +2241,7 @@
    "description": "The image view of the selected processing run, or of the selected measurement's latest usable processing result: log scale, colours from the 1st to the 99.5th percentile, zero and negative values transparent.",
    "options": {
     "mode": "html",
-    "content": "<img src=\"/run-images/${run:percentencode}/image?size=768&t=${__to}\" alt=\"No corrected image for the selected run (see the line above the curve)\" style=\"display:block;margin:auto;max-width:100%;max-height:calc(100% - 1.6em)\"><p style=\"text-align:center;margin:0.2em 0 0;opacity:0.7\">The same result as the curve: named in the line above it.</p>"
+    "content": "<img src=\"/run-images/${run:percentencode}/image?size=768&root=${root:percentencode}&t=${__to}\" alt=\"No corrected image for the selected run (see the line above the curve)\" style=\"display:block;margin:auto;max-width:100%;max-height:calc(100% - 1.6em)\"><p style=\"text-align:center;margin:0.2em 0 0;opacity:0.7\">The same result as the curve: named in the line above it.</p>"
    }
   },
   {
@@ -1972,7 +2268,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/related?uid=${run:percentencode}",
+     "url": "http://adapter:8000/selection/related?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2076,7 +2372,7 @@
         "value": [
          {
           "title": "Select run",
-          "url": "/d/ett-timeline/timeline?var-run=${__data.fields[\"uid\"]}&${__url_time_range}"
+          "url": "/d/ett-timeline?var-run=${__data.fields[\"uid\"]:percentencode}&var-root=&var-lane=&${preset:queryparam}&${unfold:queryparam}&var-stream=&${__url_time_range}"
          }
         ]
        }
@@ -2345,7 +2641,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&max_points=2000&axis=1",
+     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2408,7 +2704,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&max_points=2000&axis=1",
+     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2447,7 +2743,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&max_points=2000&axis=2",
+     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=2",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2511,7 +2807,7 @@
      }
     ]
    },
-   "description": "The selected run's time series view over every run in range on the same lane with the same plan name and the same view: one line per field, broken between runs."
+   "description": "The selected run's time series view over every run in range on the selected lane (the line above names it) with the same plan name and the same view: one line per field, broken between runs."
   },
   {
    "type": "row",
@@ -2549,7 +2845,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}",
+     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2664,7 +2960,7 @@
        "source": "url",
        "parser": "backend",
        "format": "table",
-       "url": "http://adapter:8000/selection/fields?uid=${run:percentencode}&stream=${stream:percentencode}",
+       "url": "http://adapter:8000/selection/fields?uid=${run:percentencode}&root=${root:percentencode}&stream=${stream:percentencode}",
        "url_options": {
         "method": "GET",
         "data": ""

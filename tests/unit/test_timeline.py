@@ -34,6 +34,7 @@ class Upstream:
         self.runs = runs
         self.down: set[str] = set()
         self.tables = 200
+        self.listings = 200
         self.table_reads = 0
         self._lock = threading.Lock()
 
@@ -48,6 +49,8 @@ class Upstream:
         parts = path.removeprefix("/search/").strip("/").split("/") if path != "/search/" else []
         keys = {i["id"]: root for root, items in self.runs.items() for i in items}
         if parts and parts[-1] in keys:  # a run: its streams
+            if self.listings != 200:
+                return httpx.Response(self.listings)
             stream = {"id": "primary", "attributes": {"metadata": {"data_keys": {"x": {}}}}}
             return httpx.Response(200, json={"data": [stream], "links": {"next": None}})
         root = "/".join(parts)
@@ -252,3 +255,45 @@ def test_scope_is_sent_only_to_proven_tiled_versions() -> None:
         layout.window_runs("", 0, 1000, 86400, 10, [("start.instrument", ("MOUSE", "X"))])
         filtered = ["filter[in][condition][key]" in params for params in searches]
         assert filtered == [sent, sent], version
+
+
+def test_stream_extents_are_cached_and_finished_runs_read_afresh() -> None:
+    """presets.md §6.5: open runs once per interval; the first sight of a run
+    closed forces a fresh read; only a complete read of a closed run is final."""
+    upstream = Upstream({"": [item("r", 100)]})
+    clock = [100.0]
+    tl = _timeline(upstream, clock)
+    open_run = RunRecord("", "r", {"uid": "r", "time": 100.0}, None)
+    first = tl.extents_of(open_run, 100.0)
+    assert [(e.stream, e.state, e.first, e.last) for e in first.streams] == [
+        ("primary", "drawn", 340.0, 350.0),
+    ]  # fmt: skip
+    assert upstream.table_reads == 1 and not first.final
+    tl.extents_of(open_run, 120.0)
+    assert upstream.table_reads == 1  # within the activity interval
+    closed = RunRecord("", "r", {"uid": "r", "time": 100.0},
+                       {"uid": "s", "time": 360.0, "num_events": {"primary": 2}})  # fmt: skip
+    done = tl.extents_of(closed, 130.0)
+    assert upstream.table_reads == 2 and done.final  # read afresh, complete: final
+    tl.extents_of(closed, 100_000.0)
+    assert upstream.table_reads == 2
+    short = RunRecord("", "r", {"uid": "r", "time": 100.0},
+                      {"uid": "s2", "time": 360.0, "num_events": {"primary": 5}})  # fmt: skip
+    partial = tl.extents_of(short, 100_001.0)
+    assert partial.streams[0].state == "unreadable" and not partial.final
+    assert partial.streams[0].detail == "2 of 5 rows"
+    upstream.tables = 500
+    tl.extents_of(short, 100_002.0)
+    assert upstream.table_reads == 3  # not final, but throttled
+    late = tl.extents_of(short, 100_100.0)
+    assert late.streams[0].state == "unreadable" and "HTTP 500" in late.streams[0].detail
+
+
+def test_failed_listing_shows_the_last_good_extents_as_stale() -> None:
+    upstream = Upstream({"": [item("r", 100)]})
+    tl = _timeline(upstream, [0.0])
+    open_run = RunRecord("", "r", {"uid": "r", "time": 100.0}, None)
+    good = tl.extents_of(open_run, 0.0)
+    upstream.listings = 503  # the run's stream listing now fails
+    stale = tl.extents_of(open_run, 1000.0)
+    assert stale.stale and stale.streams == good.streams and stale.error is not None

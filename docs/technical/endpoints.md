@@ -110,7 +110,7 @@ The two searches are not one snapshot of the catalogue. The open search goes
 first, so a run closing between them is found closed; other concurrent
 changes appear at the next refresh.
 
-## `GET /clips/status?from&to[&preset]`
+## `GET /clips/status?from&to[&preset][&unfold]`
 
 Whether the window's data is complete, as the preset draws it: what the
 Timeline page's *Data status* panel shows.
@@ -119,7 +119,7 @@ Timeline page's *Data status* panel shows.
 {"preset": "instruments", "preset_revision": "…", "evaluated_at": 0,
  "matched_runs": 0, "out_of_scope": 0, "placements": 0, "lanes": 0, "rows": 0,
  "lanes_cut": 0, "placements_cut": 0, "rows_cut": 0, "streams_unknown": 0,
- "invalid_groups": 0,
+ "invalid_groups": 0, "unfold": null,
  "state": "complete", "complete": true, "runs": 0, "truncated": false,
  "unplaceable": [], "open_run_horizon_days": 21, "max_runs": 10000,
  "sources": [...], "issues": [{"state": "complete", "root": "", "message": "..."}]}
@@ -133,10 +133,14 @@ mapping group values), else `complete`. Going over a lane, placement or row
 budget (`ETT_MAX_LANES`, `ETT_MAX_PLACEMENTS`, `ETT_MAX_SUBLANES`, or the
 preset's `lanes.max_lanes`) is `incomplete`: the excess is not drawn, and
 says so. `runs` counts runs in the window (each once), `matched_runs` those
-the preset places, `placements` and `lanes` what is drawn. `issues` has one row per problem, worst first, or
+the preset places, `placements` and `lanes` what is drawn. With `unfold`,
+`unfold` is `{"lane", "requested", "found", "runs_unfolded", "runs_folded",
+"streams": {"drawn", "empty", "pending", "invalid", "unreadable", "refused"},
+"stale", "notes"}`, and runs left folded, streams not drawn and stale extents
+are `partial` (or `stale`) issues: about what is drawn, never a run's status. `issues` has one row per problem, worst first, or
 one `complete` row. `sources` is as in `/clips`.
 
-## `GET /clips/frame?from&to[&min_lanes][&preset]`
+## `GET /clips/frame?from&to[&min_lanes][&preset][&unfold]`
 
 The State timeline frame (plan §8), a list of rows in the preset's lane
 order, one per placement (a run in two tracks is in two rows):
@@ -151,6 +155,23 @@ order, one per placement (a run in two tracks is in two rows):
 | `clip_from_ms`, `clip_to_ms` | true extent (open runs: up to `observed_at`) |
 | `zoom_from_ms`, `zoom_to_ms` | the true extent with 5 % (at least 5 s) on either side, for "Zoom to run": never an empty range |
 | `lane_id`, `track`, `root` | hidden helpers: which placement (lane ids are stable, names may not be) |
+| `stream`, `stream_from_ms`, `stream_to_ms` | a stream bar of an unfolded lane: the stream and its true extent (earliest to latest event time); `null` on other rows |
+
+**`unfold=<lane id>`** (empty: none) draws that lane per stream
+([presets](../design/presets.md) §6.5): its latest runs (at most
+`ETT_UNFOLD_MAX_RUNS`, read within `ETT_UNFOLD_TIME_S`) become one bar per
+stream with events, on rows `<lane> · <stream>` in stream-name order, each
+from the stream's earliest to latest event time, also for open runs (never
+extended to now; a single event is widened for visibility only). Its other
+runs, and runs with nothing to draw, stay on one row `<lane> · earlier runs`.
+`label` gets ` · <stream>`; `state`, `status`, `clip_*` and `zoom_*` stay the
+run's. Other lanes are unchanged. A lane not in the range is a notice in the
+status, not an error. Only each stream's `time` column is read (Tiled cannot
+select rows): a closed run's declared count refuses a stream over
+`ETT_UNFOLD_MAX_EVENTS` before reading, an open stream's transfer stops
+there, and at most `ETT_UNFOLD_MAX_STREAMS` streams per run are read.
+Extents of finished runs are kept once read completely; open runs are
+re-read at most every `ETT_ACTIVITY_REFRESH_S`.
 
 With `min_lanes` (0–20; default: the preset's `lanes.min_lanes`) and fewer
 rows than that (sub-lanes included), empty rows are added after the real ones: one row each, `lane`

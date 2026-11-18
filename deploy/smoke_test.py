@@ -13,7 +13,7 @@ Checks, through the published proxy and inside the containers:
    real data readable);
 4. the adapter's key is refused a valid node-create request (this is the
    disposable demo Tiled, so a wrongly privileged key would only write there).
-5. every panel query of the timeline dashboard (collapsed rows included)
+5. every panel query of the Timeline and Overview dashboards (collapsed rows included)
    returns without error with no run selected, with a MOUSE measurement and
    with the generic instrument's run selected; the timeline frame has clips,
    Data status has a row, the generic run has a time series, and the MOUSE
@@ -166,10 +166,12 @@ print(first(lambda s: s.get("instrument") == "MOUSE" and s.get("sampleid")),
 """
 
 
-def panel_queries(run: str, stream: str) -> list[tuple[str, int, str]]:
+def panel_queries(
+    run: str, stream: str, dashboard: str = "ett-timeline"
+) -> list[tuple[str, int, str]]:
     """(panel title, rows, error) for every query of the timeline dashboard,
     with ``run`` and ``stream`` as the selection (empty: none)."""
-    status, body = http("/api/dashboards/uid/ett-timeline")
+    status, body = http(f"/api/dashboards/uid/{dashboard}")
     if status != 200:
         return [("dashboard", 0, f"HTTP {status}")]
     now = time.time()
@@ -177,8 +179,11 @@ def panel_queries(run: str, stream: str) -> list[tuple[str, int, str]]:
     panels = json.loads(body)["dashboard"]["panels"]
     for panel in [*panels, *(p for row in panels for p in row.get("panels", []))]:
         for target in panel.get("targets", []):
-            url = target["url"].replace("${run:percentencode}", run)
-            query = dict(target, url=url.replace("${stream:percentencode}", stream))
+            url = target["url"]
+            for name, value in (("run", run), ("stream", stream), ("root", ""), ("lane", ""),
+                                ("unfold", ""), ("preset", "instruments")):  # fmt: skip
+                url = url.replace(f"${{{name}:percentencode}}", value)
+            query = dict(target, url=url)
             window = {"from": str(int((now - 86400) * 1000)), "to": str(int(now * 1000))}
             status, body = http("/api/ds/query", {"queries": [query], **window})
             if status != 200:
@@ -263,6 +268,12 @@ def main() -> None:
             check("MOUSE run has related runs", related > 0, f"{related} rows")
             curve = rows.get("Corrected curve", 0)
             check("MOUSE run has a corrected curve", curve > 0, f"{curve} points")
+        overview = panel_queries(*selection, dashboard="ett-overview")
+        errors = [f"{title}: {error}" for title, _, error in overview if error]
+        detail = "; ".join(errors) or f"{len(overview)} queries"
+        check(f"overview dashboard queries, {name}", not errors, detail)
+        latest = sum(n for title, n, _ in overview if title == "Latest runs on the lane")
+        check(f"overview lists the latest runs, {name}", latest > 0, f"{latest} rows")
 
     cookie = session_cookie()
     check("signed in through Grafana's login", bool(cookie))

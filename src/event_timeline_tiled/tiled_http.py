@@ -11,6 +11,7 @@ maintenance page is reported by status and a fixed description only.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Iterable, Sequence
 from enum import StrEnum
@@ -231,6 +232,23 @@ class TiledReader:
             raise SourceError(HealthStatus.UNREACHABLE, type(exc).__name__) from None
         except httpx.HTTPError as exc:
             raise SourceError(HealthStatus.ERROR, type(exc).__name__) from None
+
+    def table_column(self, path: str, column: str, max_bytes: int) -> list[Any]:
+        """One whole column of a table node, as JSON of at most ``max_bytes``
+        (the transfer is cut off beyond it: the server's read is not)."""
+        raw = self.get_bytes(
+            f"/table/full/{tiled_path(path)}",
+            {"column": column, "format": "application/json"},
+            max_bytes=max_bytes,
+        )
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            raise SourceError(HealthStatus.ERROR, "response is not JSON") from None
+        values = body.get(column) if isinstance(body, dict) else None
+        if not isinstance(values, list):
+            raise SourceError(HealthStatus.ERROR, "table response lacks the requested column")
+        return values
 
     def table_columns(self, path: str, columns: Sequence[str]) -> dict[str, list[Any]]:
         """Whole columns of a table node (Tiled cannot select rows)."""

@@ -14,7 +14,8 @@ from ..run_state import Status
 from ..settings import Settings
 from ..tiled_http import HealthStatus
 from ..timeline import SourceFetch, WindowResult
-from .common import FROM, PRESET, TO, check_window
+from ..unfold import Unfolded, unfold_lane
+from .common import FROM, LANE, PRESET, TO, check_window
 from .state import Adapter
 
 _SEVERITY = {"complete": 0, "partial": 1, "stale": 2, "incomplete": 3}
@@ -80,6 +81,30 @@ def _arrangement_issues(
     return out
 
 
+def _unfold_issues(unfolded: Unfolded | None) -> list[tuple[str, str, str]]:
+    """What unfolding a lane could not draw (presets.md §6.5): completeness
+    issues, never run failures."""
+    if unfolded is None:
+        return []
+    if unfolded.lane is None:
+        return [("partial", "", "the unfolded lane is not in this range: fold it, or select "
+                                "another")]  # fmt: skip
+    out: list[tuple[str, str, str]] = []
+    notes = [n for n in unfolded.notes if n]
+    if unfolded.runs_folded:
+        why = f" ({'; '.join(notes)})" if notes else ""
+        out.append(("partial", "", f"{unfolded.runs_folded} run(s) of the unfolded lane drawn "
+                                   f"folded{why}"))  # fmt: skip
+    missing = {k: v for k, v in unfolded.streams.items()
+               if k in ("pending", "invalid", "unreadable", "refused") and v}  # fmt: skip
+    if missing:
+        listed = ", ".join(f"{v} {k}" for k, v in sorted(missing.items()))
+        out.append(("partial", "", f"streams of the unfolded lane not drawn: {listed}"))
+    if unfolded.stale:
+        out.append(("stale", "", f"{unfolded.stale} unfolded run(s) as last read"))
+    return out
+
+
 def _fetch_row(f: SourceFetch, now: float) -> dict[str, Any]:
     return {
         "root": f.root or "/",
@@ -141,15 +166,20 @@ def router(adapter: Adapter) -> APIRouter:
         return [{"id": p.id, "title": p.title} for p in adapter.presets.ordered()]
 
     def _drawn(
-        preset: str | None, t_from: float, t_to: float, min_lanes: int | None
-    ) -> tuple[WindowResult, Arrangement, list[dict[str, Any]], int]:
+        preset: str | None, t_from: float, t_to: float, min_lanes: int | None, unfold: str | None
+    ) -> tuple[WindowResult, Arrangement, list[dict[str, Any]], int, Unfolded | None]:
         chosen = adapter.preset(preset)
         result, arranged = adapter.arrange(chosen, t_from, t_to)
         names, taken = final_names(arranged.lanes)
+        unfolded = None
+        if unfold:
+            now = clock()
+            unfolded = unfold_lane(arranged, unfold, result.records,
+                                   lambda run: timeline.extents_of(run, now), settings)  # fmt: skip
         padding = chosen.lanes.min_lanes if min_lanes is None else min_lanes
         rows, rows_cut = frame(arranged.placements, names, taken, t_from, t_to, padding,
-                               settings.max_sublanes)  # fmt: skip
-        return result, arranged, rows, rows_cut
+                               settings.max_sublanes, unfolded)  # fmt: skip
+        return result, arranged, rows, rows_cut, unfolded
 
     def _about(arranged: Arrangement) -> dict[str, Any]:
         return {"preset": arranged.preset, "preset_revision": adapter.presets.revision,
@@ -209,25 +239,30 @@ def router(adapter: Adapter) -> APIRouter:
         t_to: TO,
         min_lanes: Annotated[int | None, Query(ge=0, le=20)] = None,
         preset: PRESET = None,
+        unfold: LANE = None,
     ) -> list[dict[str, Any]]:
         """The timeline frame of plan §8 (milliseconds) in the preset's lanes,
         final, padded with empty rows up to ``min_lanes`` (default: the
-        preset's). Whether it is complete is ``/clips/status``."""
+        preset's); with ``unfold``, that lane drawn per stream. Whether it is
+        complete is ``/clips/status`` (with the same parameters)."""
         check_window(t_from, t_to)
-        return _drawn(preset, t_from, t_to, min_lanes)[2]
+        return _drawn(preset, t_from, t_to, min_lanes, unfold)[2]
 
     @api.get("/clips/status")
-    def clips_status(t_from: FROM, t_to: TO, preset: PRESET = None) -> dict[str, Any]:
+    def clips_status(
+        t_from: FROM, t_to: TO, preset: PRESET = None, unfold: LANE = None
+    ) -> dict[str, Any]:
         """Is the window's data complete, as the preset draws it? ``issues``
         lists every reason it is not (one ``complete`` row if it is), worst
         first."""
         check_window(t_from, t_to)
-        result, arranged, rows, rows_cut = _drawn(preset, t_from, t_to, 0)
+        result, arranged, rows, rows_cut, unfolded = _drawn(preset, t_from, t_to, 0, unfold)
         now = clock()
         issues = sorted(
-            [*_issues(result, settings, now), *_arrangement_issues(arranged, rows_cut, settings)],
+            [*_issues(result, settings, now), *_arrangement_issues(arranged, rows_cut, settings),
+             *_unfold_issues(unfolded)],
             key=lambda i: -_SEVERITY[i[0]],
-        )
+        )  # fmt: skip
         state = issues[0][0] if issues else "complete"
         if not issues:
             roots = len(result.fetches)
@@ -249,6 +284,7 @@ def router(adapter: Adapter) -> APIRouter:
             "rows_cut": rows_cut,
             "streams_unknown": arranged.streams_unknown,
             "invalid_groups": arranged.invalid_groups,
+            "unfold": unfolded.as_status() if unfolded is not None else None,
             "from": t_from,
             "to": t_to,
             "state": state,

@@ -84,7 +84,7 @@ class Runs:
         try:
             for stream in layout.streams(run):
                 times: list[float] = []
-                if stream.has_table:
+                if stream.has_scalar_fields:
                     raw = layout.event_columns(run, stream.name)["time"]
                     times = [t for t in raw if isinstance(t, int | float) and math.isfinite(t)]
                 count = run.num_events(stream.name)
