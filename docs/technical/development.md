@@ -26,3 +26,17 @@ together. Record the reason in [decisions](../design/decisions.md).
 
 Commits follow Conventional Commits. Keep the changelog's
 `<!-- version list -->` marker; do not bump versions by hand.
+
+## Dashboards
+
+`grafana/dashboards/timeline.json` is generated: edit
+`grafana/generator/timeline_dashboard.py` (one function per row, positions
+relative to the row) or the building blocks in `dash_parts.py`, then run
+
+```sh
+uv run --locked python grafana/generator
+```
+
+and commit both. A test fails if the JSON differs from the generator's
+output. Grafana provisions only the JSON, which stays declarative.
+`health.json` is still written by hand.

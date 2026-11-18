@@ -611,6 +611,15 @@ presets in the browser; alerting; raw MOUSE detector frames.
 
 ## 13. Later
 
+- A package any user of Bluesky and Tiled can use for instrument overviews:
+  synchrotrons, neutron sources and labs (the maintainer's wish,
+  2026-11-17), once it works for MOUSE and electrochemistry. Already instrument-agnostic: instrument knowledge
+  sits in the view table only, and the Bluesky-in-Tiled layout in one
+  module. To open up: the view table as configuration a facility supplies,
+  not Python; the processing-run contract (written with MoDaCor) as one
+  option among others; the `facility`/`instrument` identity keys; and
+  deployment beyond one site's stack.
+
 - Queued items as future clips on each instrument's lane, built on the queue
   status source (section 5.5).
 - Raw MOUSE frames, once `mouse_bluesky` registers Eiger files with Tiled.

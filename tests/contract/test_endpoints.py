@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from event_timeline_tiled.adapter import app as adapter_app
 from event_timeline_tiled.adapter import create_app
+from event_timeline_tiled.adapter import runs as adapter_runs
 from event_timeline_tiled.settings import Settings
 
 Server = tuple[Any, dict[str, Any]]
@@ -235,10 +235,10 @@ def test_table_row_limit_is_exact(
     client, manifest = api
     uid = manifest["runs"]["shared_field"]["uid"]
     n = len(client.get(f"/runs/{uid}/data").json()["rows"])
-    monkeypatch.setattr(adapter_app, "TABLE_ROW_LIMIT", n)
+    monkeypatch.setattr(adapter_runs, "TABLE_ROW_LIMIT", n)
     exact = client.get(f"/runs/{uid}/data").json()
     assert (len(exact["rows"]), exact["truncated"]) == (n, False)
-    monkeypatch.setattr(adapter_app, "TABLE_ROW_LIMIT", n - 1)
+    monkeypatch.setattr(adapter_runs, "TABLE_ROW_LIMIT", n - 1)
     cut = client.get(f"/runs/{uid}/data").json()
     assert (len(cut["rows"]), cut["truncated"]) == (n - 1, True)
     assert "only the first" in cut["notice"]
