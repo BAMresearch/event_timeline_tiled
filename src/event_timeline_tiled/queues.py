@@ -91,12 +91,90 @@ def _item_name(item: Any) -> str | None:
     return None
 
 
+RUNNING_STATES = frozenset({"starting_queue", "executing_queue", "paused"})
+"""Manager states (bluesky-queueserver 0.0.26 ``MState``) in which the queue runs."""
+
+
+def _count(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+@define
+class QueueRun:
+    """Progress of the queue's current or last run, as this adapter saw it.
+
+    The RE Manager records neither when items were added nor which items make
+    up a run; it reports how many items are in the queue and in the history.
+    So a run starts when the manager is first seen running the queue, items
+    done are the growth of the history since then, and the total is that plus
+    the items still queued and the running one. If the manager was seen idle
+    before, the history size then is the start (``from_start``: everything since
+    the queue started is counted, though ``since`` is when the adapter noticed);
+    otherwise (the adapter started mid-run) counting starts at first sight.
+    Items added or removed during a run change the total; a cleared history
+    restarts the count.
+    """
+
+    idle_history: int | None = None
+    """The history size when the manager was last seen not running the queue."""
+    start_history: int | None = None
+    since: float | None = None
+    from_start: bool = False
+    active: bool = False
+    done: int | None = None
+    total: int | None = None
+
+    def observe(
+        self, manager_state: Any, history: Any, in_queue: Any, running: bool, now: float
+    ) -> None:
+        history, in_queue = _count(history), _count(in_queue)
+        if history is None or in_queue is None:
+            return
+        if manager_state in RUNNING_STATES:
+            if not self.active or self.start_history is None:
+                self.active = True
+                idle = self.idle_history
+                self.from_start = idle is not None and idle <= history
+                self.start_history = idle if idle is not None and idle <= history else history
+                self.since = now
+            elif history < self.start_history:  # history cleared during the run
+                self.start_history, self.from_start, self.since = history, False, now
+            self.done = history - self.start_history
+            self.total = self.done + in_queue + (1 if running else 0)
+            return
+        if self.active and self.start_history is not None and history >= self.start_history:
+            # The run ended: finished, or stopped with items left in the queue.
+            self.done = history - self.start_history
+            self.total = self.done + in_queue
+        self.active = False
+        self.idle_history = history
+
+    def fields(self) -> dict[str, Any]:
+        done, total = self.done, self.total
+        text = None
+        if done is not None and total is not None:
+            text = f"{done} of {total}"
+            if not self.active and done < total:
+                text += ", stopped"
+        return {
+            "run_active": self.active,
+            "run_done": done,
+            "run_total": total,
+            "run_progress": round(done / total, 4) if done is not None and total else None,
+            "run_since": self.since,
+            "run_from_start": self.from_start if self.since is not None else None,
+            "run_text": text,
+        }
+
+
 @define
 class _State:
     queue: ReadOnlyQueue | None = None
     last_success: float | None = None
     error: str | None = None
     detail: str = ""
+    run: QueueRun = field(factory=QueueRun)
+    lock: threading.Lock = field(factory=threading.Lock)
 
 
 @define
@@ -125,6 +203,7 @@ class QueueMonitor:
             "items_in_queue": None,
             "next_items": None,
             "queue_stop_pending": None,
+            **QueueRun().fields(),
         }
         try:
             if state.queue is None:
@@ -156,6 +235,15 @@ class QueueMonitor:
                 next_items=", ".join(names[:3]) or None,
                 queue_stop_pending=status.get("queue_stop_pending"),
             )
+            with state.lock:
+                state.run.observe(
+                    status.get("manager_state"),
+                    status.get("items_in_history"),
+                    status.get("items_in_queue"),
+                    isinstance(running, Mapping) and bool(running),
+                    now,
+                )
+                row.update(state.run.fields())
         # One display value: the manager's own state, or why there is none.
         row["state"] = row["manager_state"] if row["reachable"] else state.error
         row.update(

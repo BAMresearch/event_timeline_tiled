@@ -15,8 +15,11 @@ From top to bottom, in sections you can collapse by clicking their title
 
 - **Top, always shown:** *Queue*, per instrument: the RE Manager's state
   (`idle`, `executing_queue`, `paused`, or `unreachable` when it does not
-  answer), the running plan, since when it runs, and the number of queued
-  items; and *Data status* (below).
+  answer), the running plan, since when it runs, the number of queued
+  items, and the progress of the current run of the queue in plans ("1 of
+  2": plans finished since the queue started, out of those plus the ones
+  still queued; the long history before it does not count); and *Data
+  status* (below).
 - **Runs and the selected run.** On the left, *Runs in range* (newest
   first), *Failed and aborted* with the recorded reason, and for the
   selected run its details and streams. On the right, the selected run's

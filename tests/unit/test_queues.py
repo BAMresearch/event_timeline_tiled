@@ -12,6 +12,7 @@ from event_timeline_tiled.queues import (
     READ_ONLY_INTERFACE,
     READ_REQUESTS,
     QueueMonitor,
+    QueueRun,
     ReadOnlyQueue,
 )
 from event_timeline_tiled.settings import QueueConfig, Settings, parse_queues
@@ -148,3 +149,69 @@ def test_http_transport_sends_only_reads_with_the_key(monkeypatch: pytest.Monkey
     assert row["state"] == "idle"
     assert {method for method, _ in sent} <= READ_REQUESTS
     assert {key for _, key in sent} == {"read-only-test-key"}
+
+
+def _run_after(*steps: tuple[str, int, int, bool]) -> QueueRun:
+    run = QueueRun()
+    for t, (state, history, queued, running) in enumerate(steps):
+        run.observe(state, history, queued, running, float(t))
+    return run
+
+
+def test_progress_counts_from_the_queue_start_not_the_history() -> None:
+    """Ventilating: two plans added to an idle queue with a long history."""
+    idle = ("idle", 30_000, 0, False)
+    queued = ("idle", 30_000, 2, False)
+    first = ("executing_queue", 30_000, 1, True)
+    second = ("executing_queue", 30_001, 0, True)
+    assert _run_after(idle).fields()["run_total"] is None  # no run seen yet
+    started = _run_after(idle, queued, first).fields()
+    assert started == {**started, "run_active": True, "run_done": 0, "run_total": 2,
+                       "run_progress": 0.0, "run_text": "0 of 2", "run_from_start": True,
+                       "run_since": 2.0}  # fmt: skip
+    assert _run_after(idle, queued, first, second).fields()["run_text"] == "1 of 2"
+    finished = _run_after(idle, queued, first, second, ("idle", 30_002, 0, False)).fields()
+    assert (finished["run_active"], finished["run_text"], finished["run_progress"]) == (
+        False, "2 of 2", 1.0,
+    )  # fmt: skip
+
+
+def test_progress_seen_only_mid_run_counts_from_first_sight() -> None:
+    fields = _run_after(("executing_queue", 500, 3, True)).fields()
+    assert (fields["run_text"], fields["run_from_start"]) == ("0 of 4", False)
+
+
+def test_progress_of_a_stopped_paused_or_growing_queue() -> None:
+    start = [("idle", 10, 3, False), ("executing_queue", 10, 2, True)]
+    paused = _run_after(*start, ("paused", 11, 1, True)).fields()
+    assert (paused["run_active"], paused["run_text"]) == (True, "1 of 3")
+    grown = _run_after(*start, ("executing_queue", 11, 4, True)).fields()
+    assert grown["run_text"] == "1 of 6"  # items added during the run
+    stopped = _run_after(*start, ("executing_queue", 11, 1, True), ("idle", 12, 1, False))
+    assert stopped.fields()["run_text"] == "2 of 3, stopped"
+    cleared = _run_after(*start, ("executing_queue", 0, 1, True)).fields()
+    assert (cleared["run_text"], cleared["run_from_start"]) == ("0 of 2", False)
+
+
+def test_progress_ignores_status_without_counts() -> None:
+    run = _run_after(("idle", 5, 0, False))
+    run.observe("executing_queue", None, 2, True, 9.0)
+    assert run.fields()["run_total"] is None and not run.active
+
+
+def test_rows_carry_the_run_progress() -> None:
+    statuses = iter(
+        [
+            {"manager_state": "idle", "items_in_queue": 2, "items_in_history": 7},
+            {"manager_state": "executing_queue", "items_in_queue": 1, "items_in_history": 7},
+        ]
+    )
+
+    class Scripted(FakeAPI):
+        def status(self, *, reload: bool = False) -> dict[str, Any]:
+            return next(statuses)
+
+    monitor = QueueMonitor((ZMQ,), lambda _c: Scripted(), clock=lambda: 130.0)
+    first, second = monitor.rows()[0], monitor.rows()[0]
+    assert first["run_text"] is None and second["run_text"] == "0 of 2"
+    assert second["run_progress"] == 0.0 and second["run_since"] == 130.0

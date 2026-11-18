@@ -18,6 +18,27 @@ when an item becomes the running item). It is not the run's start document
 time, and a pause does not reset it. Status and queue are two reads, so
 during a transition they can briefly disagree.
 
+*Progress* is the queue's current run (or the last one, after it ends),
+counted in plans. The RE Manager records neither when items were added nor
+which items make up a run, and its history holds every item ever run (tens
+of thousands on MOUSE), so the adapter counts from what it sees: a run starts
+when the manager is first seen in `starting_queue`, `executing_queue` or
+`paused`; plans done are the growth of `items_in_history` since then; the
+total is that plus `items_in_queue` and the running item. Two plans added to
+an idle queue (ventilating, say) show as 0 of 2, 1 of 2, 2 of 2.
+
+- If the manager was seen idle before, everything since the queue started
+  counts (`run_from_start`); the adapter reads the queue only when a
+  dashboard refreshes, so `run_since` is when it noticed, up to one refresh
+  late. After an adapter restart in the middle of a run, counting starts at
+  first sight.
+- Plans added or removed during a run change the total; a run stopped with
+  plans left shows them ("5 of 12, stopped"); a cleared history restarts the
+  count. It is progress in plans, not in time: plans do not report their own
+  progress.
+- Both counts come from `status`: no other call, and no change to the
+  read-only wrapper.
+
 Configure it in `deploy/.env`, one entry per instrument:
 
 ```sh

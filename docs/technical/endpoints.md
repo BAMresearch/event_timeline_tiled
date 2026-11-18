@@ -43,6 +43,7 @@ request time; `[]` if none is configured.
 | `manager_state`, `re_state`, `environment_open`, `queue_stop_pending` | from the RE Manager's status; `null` when unreachable |
 | `running_plan`, `running_since` | name of the running item, and when the RE Manager started executing it (seconds; not the run's start document, and not reset by a pause) |
 | `items_in_queue`, `next_items` | queued items; names of the next three |
+| `run_active`, `run_done`, `run_total`, `run_progress`, `run_text`, `run_since`, `run_from_start` | the queue's current or last run, in plans: done since it started (`run_from_start` false: since the adapter first saw it running), total with the queued and running plans, done ÷ total, `"3 of 12"` (`", stopped"` when it ended with plans left), and when the adapter saw it start ([queue status](queues.md)); `null` until a run has been seen, and while unreachable |
 | `last_success`, `data_age_s`, `error`, `error_detail` | when it last answered, and why not now |
 
 ## `GET /clips?from&to[&status]`
