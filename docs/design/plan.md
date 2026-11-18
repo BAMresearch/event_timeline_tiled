@@ -756,6 +756,8 @@ presets in the browser; alerting; raw MOUSE detector frames.
    multi-user mode with a scoped key for the adapter (and, with it, the
    catalogue migrations up to the demo's 0.2.21, §10.2), or another way to
    a read-only credential; and whether §14's network statement still holds.
+   These, and the dashboard host's Podman set-up, are in
+   [questions for IT](../technical/questions-for-it.md).
 
 Review 06 of the work since review 05 and of step 6 folded in 2026-11-17
 ([disposition](reviews/disposition-06.md)); its finding 9 (bounding the
