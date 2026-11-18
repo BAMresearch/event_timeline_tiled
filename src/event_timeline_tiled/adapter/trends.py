@@ -10,13 +10,13 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from ..clips import lane_key
+from ..lanes import final_names
 from ..layout import RunRecord
 from ..run_state import role_of
 from ..tiled_http import SourceError
 from ..trend import Piece, trend_rows
 from ..views import ResolvedView, ViewKind, resolve
-from .common import AXIS, FROM, MAX_POINTS, TO, UID, check_window, json_value
+from .common import AXIS, FROM, LANE, MAX_POINTS, PRESET, ROOT, TO, UID, check_window, json_value
 from .runs import axis_fields, series_names
 from .state import Adapter
 
@@ -100,11 +100,19 @@ class Trends:
         return Piece(run.key, data["time"], values), len(present) < len(fields)
 
     def trend(
-        self, run: RunRecord, t_from: float, t_to: float, max_points: int, axis: int | None
+        self,
+        run: RunRecord,
+        t_from: float,
+        t_to: float,
+        max_points: int,
+        axis: int | None,
+        preset: str | None = None,
+        lane: str | None = None,
     ) -> dict[str, Any]:
         """The selected run's time series view over every run like it in the
-        window: same lane, role and ``plan_name``, and the same view of the same
-        stream. One series per field; a gap between runs."""
+        window: in the selected lane of the preset (else the run's first lane
+        there), with the same role and ``plan_name``, and the same view of the
+        same stream. One series per field; a gap between runs."""
         view = next(
             (v for v in self.adapter.views_of(run)
              if v.available and v.kind is ViewKind.TIMESERIES),
@@ -117,12 +125,13 @@ class Trends:
         [stream] = view.streams
         wanted = axis_fields(view, axis)
         fields = wanted[: max_points // 3]
-        result = self.adapter.timeline.window(t_from, t_to)
-        key, role, plan = lane_key(run), role_of(run.start), run.start.get("plan_name")
+        result, arranged = self.adapter.arrange(self.adapter.preset(preset), t_from, t_to)
+        in_lane = arranged.lane(lane) if lane else arranged.first_lane(run.root, run.key)
+        names, _ = final_names(arranged.lanes)
+        role, plan = role_of(run.start), run.start.get("plan_name")
         like = sorted(
-            (c for c in result.clips
-             if c.lane_key == key and c.role is role
-             and result.records[(c.root, c.uid)].start.get("plan_name") == plan),
+            (c for c in (arranged.runs_in(in_lane.id) if in_lane else [])
+             if c.role is role and result.records[(c.root, c.uid)].start.get("plan_name") == plan),
             key=lambda c: (c.start, c.uid),
         )  # fmt: skip
         runs_cut = len(like) > TREND_MAX_RUNS
@@ -146,8 +155,17 @@ class Trends:
         trend = trend_rows(pieces, fields, series_names(view, fields), max_points, json_value)
         fields_cut = len(fields) < len(wanted)
         what = plan if isinstance(plan, str) else "unnamed"
-        notice = (f"{view.title} of {stream} over {trend.runs} {what} runs in range: "
+        place = f" on {names[in_lane.id]}" if in_lane else ""
+        notice = (f"{view.title} of {stream} over {trend.runs} {what} runs{place} in range: "
                   f"{trend.kept} of {trend.events} events")  # fmt: skip
+        if in_lane is None:
+            notice += ", no runs like it: " + (
+                "that lane is not in this preset's range"
+                if lane
+                else "the run is in no lane of this preset in range"
+            )
+        elif not lane:
+            notice += ", lane: the run's first in this preset"
         if runs_cut:
             notice += f", the latest {TREND_MAX_RUNS} of {len(like)} runs only"
         if result.truncated:
@@ -168,6 +186,9 @@ class Trends:
             "fields": fields,
             "units": dict(view.units),
             "plan_name": plan,
+            "preset": arranged.preset,
+            "lane": in_lane.id if in_lane else None,
+            "lane_name": names[in_lane.id] if in_lane else None,
             "rows": trend.rows,
             "truncated": fields_cut or runs_cut or result.truncated,
             "runs": {
@@ -197,10 +218,18 @@ def router(adapter: Adapter, trends: Trends) -> APIRouter:
 
     @api.get("/runs/{uid}/trend")
     def run_trend(
-        uid: UID, t_from: FROM, t_to: TO, max_points: MAX_POINTS = 2000, axis: AXIS = None
+        uid: UID,
+        t_from: FROM,
+        t_to: TO,
+        max_points: MAX_POINTS = 2000,
+        axis: AXIS = None,
+        preset: PRESET = None,
+        lane: LANE = None,
+        root: ROOT = None,
     ) -> dict[str, Any]:
         """The run's time series view over the runs like it in ``[from, to)``."""
         check_window(t_from, t_to)
-        return trends.trend(adapter.find(uid), t_from, t_to, max_points, axis)
+        run = adapter.find(uid, root)
+        return trends.trend(run, t_from, t_to, max_points, axis, preset, lane)
 
     return api

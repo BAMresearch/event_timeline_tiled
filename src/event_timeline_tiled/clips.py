@@ -1,24 +1,26 @@
-"""Clips, lanes and the timeline frame (plan §3.1, §8).
+"""Clips and the timeline frame (plan §3.1, §8; presets.md §6).
 
 Pure functions: no Tiled access. A *clip* is one run as the timeline shows
-it; its *lane key* is (facility, instrument, station, role). The frame is the
-long table Grafana's State timeline splits with one "Partition by values" on
-the final ``lane`` column, so lanes and sub-lanes are allocated here.
+it. Which lanes it is drawn in is a preset's business (:mod:`.lanes`); the
+frame is the long table Grafana's State timeline splits with one "Partition
+by values" on the final ``lane`` column, so sub-lanes and every row's final,
+unique name are allocated here.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Any
-from urllib.parse import quote
+from typing import TYPE_CHECKING, Any
 
 from attrs import frozen
 
 from .layout import RunRecord
 from .run_state import Activity, Role, Status, role_of, status_of
 
-UNKNOWN_INSTRUMENT = "(unknown)"
+if TYPE_CHECKING:
+    from .lanes import Placement
+
 MIN_DISPLAY_FRACTION = 0.002
 """Clips shorter than this fraction of the window are widened for display
 only (a 3-second run in 12 hours would be a fraction of a pixel); their true
@@ -29,73 +31,7 @@ ZOOM_PAD_MIN_S = 5.0
 of its duration, at least ``ZOOM_PAD_MIN_S``): never an empty range."""
 
 
-def _component(value: str | None) -> str:
-    """One lane-key component: percent-encoded, ``-`` for a missing one."""
-    if value is None:
-        return "-"
-    return "%2D" if value == "-" else quote(value, safe="")
-
-
-@frozen
-class LaneKey:
-    facility: str | None
-    instrument: str
-    station: str | None
-    role: Role
-
-    def as_text(self) -> str:
-        """``facility/instrument/station/role``, each part percent-encoded and
-        ``-`` for a missing one, so different keys never share a text."""
-        return "/".join(
-            [
-                _component(self.facility),
-                _component(self.instrument),
-                _component(self.station),
-                self.role.value,
-            ]
-        )
-
-
-def _text(value: Any) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def lane_key(run: RunRecord) -> LaneKey:
-    """Runs without ``instrument`` go to a labelled fallback: their catalogue
-    root if it is not the server root, else ``(unknown)``. Never one lane per run."""
-    instrument = _text(run.start.get("instrument"))
-    if instrument is None:
-        instrument = f"({run.root})" if run.root else UNKNOWN_INSTRUMENT
-    return LaneKey(
-        _text(run.start.get("facility")),
-        instrument,
-        _text(run.start.get("station")),
-        role_of(run.start),
-    )
-
-
-def lane_names(keys: Sequence[LaneKey]) -> dict[LaneKey, str]:
-    """Display names, unique per key: instrument, station, "· processing"; the
-    facility is added only where two lanes would otherwise share a name, and
-    a number in brackets where even that is not enough (in lane order)."""
-
-    def short(k: LaneKey) -> str:
-        name = k.instrument + (f" {k.station}" if k.station else "")
-        return name + (" · processing" if k.role is Role.PROCESSING else "")
-
-    ordered = sorted(set(keys), key=lambda k: (*_lane_order(k), k.as_text()))
-    names = {k: short(k) for k in ordered}
-    counts: dict[str, int] = {}
-    for name in names.values():
-        counts[name] = counts.get(name, 0) + 1
-    taken = _Names()
-    return {
-        k: taken.claim(f"{k.facility or '-'} {name}" if counts[name] > 1 else name)
-        for k, name in names.items()
-    }
-
-
-class _Names:
+class Names:
     """Hands out unique display names: a name already taken gets " (2)", " (3)", …"""
 
     def __init__(self) -> None:
@@ -109,6 +45,13 @@ class _Names:
         self._taken.add(candidate)
         return candidate
 
+    def __contains__(self, name: str) -> bool:
+        return name in self._taken
+
+
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
 
 @frozen
 class Clip:
@@ -118,7 +61,6 @@ class Clip:
     start_uid: str | None
     uid_mismatch: bool
     root: str
-    lane_key: LaneKey
     role: Role
     start: float
     stop: float | None
@@ -132,13 +74,13 @@ class Clip:
     """When this run's record was last fetched from Tiled: an open run is
     drawn up to here and no further."""
 
-    def as_row(self, lane: str) -> dict[str, Any]:
+    def as_row(self, lane_id: str | None, lane: str | None) -> dict[str, Any]:
         return {
             "uid": self.uid,
             "start_uid": self.start_uid,
             "uid_mismatch": self.uid_mismatch,
             "root": self.root or "/",
-            "lane_key": self.lane_key.as_text(),
+            "lane_key": lane_id,
             "lane": lane,
             "role": self.role.value,
             "start": self.start,
@@ -166,7 +108,6 @@ def make_clip(
         start_uid=run.start_uid,
         uid_mismatch=run.uid_mismatch,
         root=run.root,
-        lane_key=lane_key(run),
         role=role_of(run.start),
         start=run.start_time,
         stop=run.stop_time,
@@ -194,25 +135,26 @@ def display_state(clip: Clip) -> str:
     return clip.status.value
 
 
-def _lane_order(key: LaneKey) -> tuple[str, str, str, int]:
-    return (
-        key.facility or "",
-        key.instrument,
-        key.station or "",
-        0 if key.role is Role.ACQUISITION else 1,
-    )
-
-
 def _zoom(start: float, end: float) -> tuple[int, int]:
     pad = max((end - start) * ZOOM_PAD_FRACTION, ZOOM_PAD_MIN_S)
     return round((start - pad) * 1000), round((end + pad) * 1000)
 
 
 def frame(
-    clips: Sequence[Clip], t_from: float, t_to: float, min_lanes: int = 0
-) -> list[dict[str, Any]]:
-    """The timeline frame: one row per clip, in lane order, with ``lane`` final.
+    placements: Sequence[Placement],
+    names: dict[str, str],
+    taken: Names,
+    t_from: float,
+    t_to: float,
+    min_lanes: int = 0,
+    max_rows: int | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """The timeline frame: one row per placement, in lane order, with ``lane``
+    final; and how many placements the row budget left out.
 
+    - ``names``: each logical lane's final name (by lane id), already claimed
+      in ``taken``; sub-lanes and padding claim theirs from it, so no two
+      rows share a name (Grafana partitions by it).
     - ``start``/``stop``: display extent in **milliseconds** (Grafana time
       fields; named so they sort in this order). Open runs end at their
       ``observed_at`` (the last successful fetch of their source), never
@@ -220,39 +162,36 @@ def frame(
       its start. Clips shorter than :data:`MIN_DISPLAY_FRACTION` of the window
       are widened, but never over the next clip in their sub-lane: runs queued
       back to back stay in one lane at every zoom level.
-    - Sub-lanes: per lane, sorted by (start, uid), each clip takes the lowest
-      sub-lane free at its start, by **true** extent; touching clips may share,
-      clips starting at the same instant may not. No clip is dropped. Every
-      (lane, sub-lane) has its own final name.
+    - Sub-lanes: per logical lane, sorted by (start, root, uid), each clip
+      takes the lowest sub-lane free at its start, by **true** extent;
+      touching clips may share, clips starting at the same instant may not.
+    - ``max_rows``: the most final rows (lanes and sub-lanes); placements on
+      further rows are left out and counted.
     - ``state``: the visible value (see :func:`display_state`).
     - ``clip_from_ms``/``clip_to_ms``: the true extent (open runs: up to
       ``observed_at``); ``zoom_from_ms``/``zoom_to_ms``: that extent padded,
-      for "Zoom to run".
-    - ``min_lanes``: with fewer lanes (sub-lanes included), empty lanes are
-      added below, so that a panel of fixed height does not draw one lane
-      as one huge bar. An empty lane is one row with an invisible, unique
-      name (non-breaking spaces), ``start`` = ``stop`` = ``from`` and every
-      other field null.
+      for "Zoom to run". ``lane_id``, ``track``, ``root``: which placement.
+    - ``min_lanes``: with fewer rows, empty rows are added below, so that a
+      panel of fixed height does not draw one lane as one huge bar. An empty
+      row has an invisible, unique name (non-breaking spaces), ``start`` =
+      ``stop`` = ``from`` and every other field null.
     """
-    names = lane_names([c.lane_key for c in clips])
     min_width = max(t_to - t_from, 0.0) * MIN_DISPLAY_FRACTION
-    rows: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    final = _Names()
-    for name in names.values():
-        final.claim(name)
-    sub_lanes: dict[tuple[LaneKey, int], str] = {}
     extents = []
-    for clip in clips:
+    for placement in placements:
+        clip = placement.clip
         if clip.status is Status.OPEN:
             end = max(clip.observed_at if clip.observed_at is not None else clip.start, clip.start)
         else:
             end = clip.stop if clip.stop is not None and clip.stop >= clip.start else clip.start
-        extents.append((clip, clip.start, end))
+        extents.append((placement, clip.start, end))
     # Sub-lanes by true extent: (busy until, last start) per sub-lane.
-    busy: dict[LaneKey, list[tuple[float, float]]] = {}
-    placed: list[tuple[Clip, float, float, int]] = []
-    for clip, start, end in sorted(extents, key=lambda e: (e[1], e[0].uid)):
-        free = busy.setdefault(clip.lane_key, [])
+    busy: dict[str, list[tuple[float, float]]] = {}
+    placed: list[tuple[Placement, float, float, int]] = []
+    for placement, start, end in sorted(
+        extents, key=lambda e: (e[1], e[0].clip.root, e[0].clip.uid)
+    ):
+        free = busy.setdefault(placement.lane.id, [])
         for index, (busy_until, last_start) in enumerate(free):
             if start >= busy_until and start > last_start:
                 free[index] = (end, start)
@@ -260,35 +199,41 @@ def frame(
         else:
             free.append((end, start))
             index = len(free) - 1
-        placed.append((clip, start, end, index))
+        placed.append((placement, start, end, index))
+    # Rows within the budget, in lane order.
+    order = {lane_id: n for n, lane_id in enumerate(dict.fromkeys(p.lane.id for p in placements))}
+    rows_wanted = sorted({(order[p.lane.id], i) for p, _, _, i in placed})
+    allowed = set(rows_wanted[:max_rows] if max_rows is not None else rows_wanted)
+    left_out = sum(1 for p, _, _, i in placed if (order[p.lane.id], i) not in allowed)
+    placed = [e for e in placed if (order[e[0].lane.id], e[3]) in allowed]
     # Widen short clips up to the next start in their sub-lane (placed is in start order).
-    next_start: dict[tuple[LaneKey, int], float] = {}
+    next_start: dict[tuple[str, int], float] = {}
     display_ends: dict[int, float] = {}
     for position in range(len(placed) - 1, -1, -1):
-        clip, start, end, index = placed[position]
-        limit = next_start.get((clip.lane_key, index), math.inf)
+        placement, start, end, index = placed[position]
+        limit = next_start.get((placement.lane.id, index), math.inf)
         display_ends[position] = max(end, min(start + min_width, limit))
-        next_start[(clip.lane_key, index)] = start
-    for position, (clip, start, end, index) in enumerate(placed):
-        display_end = display_ends[position]
-        if index == 0:
-            lane = names[clip.lane_key]
-        else:
-            lane = sub_lanes.get((clip.lane_key, index)) or sub_lanes.setdefault(
-                (clip.lane_key, index), final.claim(f"{names[clip.lane_key]} /{index + 1}")
-            )
+        next_start[(placement.lane.id, index)] = start
+    sub_lanes: dict[tuple[str, int], str] = {}
+    for lane_id, index in sorted({(e[0].lane.id, e[3]) for e in placed if e[3] > 0},
+                                 key=lambda k: (order[k[0]], k[1])):  # fmt: skip
+        sub_lanes[(lane_id, index)] = taken.claim(f"{names[lane_id]} /{index + 1}")
+    rows: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    for position, (placement, start, end, index) in enumerate(placed):
+        clip, lane = placement.clip, placement.lane
+        name = names[lane.id] if index == 0 else sub_lanes[(lane.id, index)]
         zoom_from, zoom_to = _zoom(clip.start, end)
         rows.append(
             (
-                (*_lane_order(clip.lane_key), clip.lane_key.as_text(), index, start, clip.uid),
+                (order[lane.id], index, start, clip.root, clip.uid),
                 {
-                    "lane": lane,
+                    "lane": name,
                     "start": round(start * 1000),
-                    "stop": round(display_end * 1000),
+                    "stop": round(display_ends[position] * 1000),
                     "state": display_state(clip),
                     "status": clip.status.value,
                     "uid": clip.uid,
-                    "label": clip.label,
+                    "label": placement.label,
                     "clip_from_ms": round(clip.start * 1000),
                     "clip_to_ms": round(end * 1000),
                     "possibly_stalled": clip.activity.possibly_stalled,
@@ -296,6 +241,9 @@ def frame(
                     "zoom_from_ms": zoom_from,
                     "zoom_to_ms": zoom_to,
                     "activity_error": clip.activity.error,
+                    "lane_id": lane.id,
+                    "track": lane.track,
+                    "root": clip.root or "/",
                 },
             )
         )
@@ -304,14 +252,14 @@ def frame(
     blank = 0
     for _ in range(min_lanes - len(lanes)):
         blank += 1
-        while "\u00a0" * blank in lanes:  # never a real lane's name
+        while "\u00a0" * blank in taken:  # never a real lane's name
             blank += 1
-        out.append(_empty_lane("\u00a0" * blank, round(t_from * 1000)))
-    return out
+        out.append(_empty_lane(taken.claim("\u00a0" * blank), round(t_from * 1000)))
+    return out, left_out
 
 
 def _empty_lane(name: str, at_ms: int) -> dict[str, Any]:
     return {"lane": name, "start": at_ms, "stop": at_ms, "state": None, "status": None,
             "uid": None, "label": None, "clip_from_ms": None, "clip_to_ms": None,
             "possibly_stalled": None, "stale": None, "zoom_from_ms": None, "zoom_to_ms": None,
-            "activity_error": None}  # fmt: skip
+            "activity_error": None, "lane_id": None, "track": None, "root": None}  # fmt: skip

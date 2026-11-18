@@ -92,3 +92,30 @@ Queue progress (2026-11-18):
 
 - `/queues` has the new fields `run_active`, `run_done`, `run_total`,
   `run_progress`, `run_text`, `run_since` and `run_from_start`. Additive.
+
+Presets, step 8 part 2 (2026-11-18): the fixed lane key is replaced by
+presets (docs/design/presets.md); nobody used the old names yet.
+
+- Lane names come from the default preset `instruments`: `MOUSE` is now
+  `MOUSE · acquisition`, `MOUSE · processing` stays, `generic A` is
+  `generic · A · acquisition`; runs without an instrument are
+  `(unknown) · acquisition` instead of a lane named after their catalogue
+  root. The facility is no longer added to a name; equal names get ` (2)`.
+- Each catalogue root has its own lanes (the root is part of the key), so an
+  instrument's lane, and its trend's peers, no longer span roots.
+- `/clips`: `lane_key` is the run's first placement's lane id
+  (`<preset>.<track>.<digest>`), no longer `facility/instrument/station/role`;
+  new `placements`, `preset`, `preset_revision`, `evaluated_at`; with a
+  preset, only the runs it places are listed.
+- `/clips/frame`: one row per placement; new hidden fields `lane_id`,
+  `track`, `root`; `min_lanes` defaults to the preset's.
+- `/clips/status`: new counts (`matched_runs`, `placements`, `lanes`, …)
+  and issues for budgets.
+- Run summaries' `lane` is the run's base lane name in the default preset.
+- The trend's "runs like it" are a preset lane's runs (`lane`, else the run's
+  first lane).
+- Run lookups take `root`; a key under several roots is `409` instead of the
+  first root's run.
+- New: `/presets`, `/selection/runs`, `preset` and `lane` parameters, and the
+  settings `ETT_PRESETS_DIR`, `ETT_DEFAULT_PRESET`, `ETT_MAX_LANES`,
+  `ETT_MAX_SUBLANES`, `ETT_MAX_PLACEMENTS`.

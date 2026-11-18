@@ -119,3 +119,7 @@ jobs:
           uv venv "$RUNNER_TEMP/wheel"
           uv pip install --python "$RUNNER_TEMP/wheel" dist/*.whl
           cd "$RUNNER_TEMP" && wheel/bin/python -c "import event_timeline_tiled.adapter"
+      - name: The default preset loads from the installed wheel
+        run: |
+          grep -qx 'event_timeline_tiled/presets/instruments.yaml' wheel.txt
+          cd "$RUNNER_TEMP" && wheel/bin/python -c "from event_timeline_tiled.presets import load_registry; assert load_registry().default == 'instruments'"

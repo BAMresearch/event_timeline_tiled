@@ -1,5 +1,5 @@
-"""Health, queue status and the window's runs: ``/health``, ``/queues``,
-``/clips``, ``/clips/frame``, ``/clips/status``."""
+"""Health, queue status, presets and the window's runs: ``/health``,
+``/queues``, ``/presets``, ``/clips``, ``/clips/frame``, ``/clips/status``."""
 
 from __future__ import annotations
 
@@ -8,12 +8,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import __version__
-from ..clips import frame, lane_names
+from ..clips import frame
+from ..lanes import Arrangement, final_names
 from ..run_state import Status
 from ..settings import Settings
 from ..tiled_http import HealthStatus
 from ..timeline import SourceFetch, WindowResult
-from .common import FROM, TO, check_window
+from .common import FROM, PRESET, TO, check_window
 from .state import Adapter
 
 _SEVERITY = {"complete": 0, "partial": 1, "stale": 2, "incomplete": 3}
@@ -52,6 +53,30 @@ def _issues(result: WindowResult, settings: Settings, now: float) -> list[tuple[
     if result.unplaceable:
         n = len(result.unplaceable)
         out.append(("partial", "", f"{n} run(s) without a usable start time not drawn"))
+    return out
+
+
+def _arrangement_issues(
+    arranged: Arrangement, rows_cut: int, settings: Settings
+) -> list[tuple[str, str, str]]:
+    """Problems with how the preset's lanes could be drawn (presets.md §6.3, §9)."""
+    out: list[tuple[str, str, str]] = []
+    if arranged.lanes_cut:
+        out.append(("incomplete", "", f"{arranged.lanes_cut} lane(s) over the lane budget "
+                                      "not drawn; narrow the preset's grouping"))  # fmt: skip
+    if arranged.placements_cut:
+        out.append(("incomplete", "", f"{arranged.placements_cut} placement(s) over "
+                                      f"{settings.max_placements} not drawn"))  # fmt: skip
+    if rows_cut:
+        out.append(("incomplete", "", f"{rows_cut} run(s) on rows over "
+                                      f"{settings.max_sublanes} not drawn; narrow the time "
+                                      "range or the grouping"))  # fmt: skip
+    if arranged.streams_unknown:
+        out.append(("partial", "", f"{arranged.streams_unknown} run(s) left out of tracks "
+                                   "that need streams not known yet"))  # fmt: skip
+    if arranged.invalid_groups:
+        out.append(("partial", "", f"{arranged.invalid_groups} placement(s) with a list or "
+                                   "mapping as a group value"))  # fmt: skip
     return out
 
 
@@ -110,29 +135,69 @@ def router(adapter: Adapter) -> APIRouter:
         managers have ``reachable: false`` and no state, never "idle"."""
         return adapter.queues.rows()
 
+    @api.get("/presets")
+    def presets() -> list[dict[str, Any]]:
+        """The loaded presets, ``{id, title}``: the default first, then by title."""
+        return [{"id": p.id, "title": p.title} for p in adapter.presets.ordered()]
+
+    def _drawn(
+        preset: str | None, t_from: float, t_to: float, min_lanes: int | None
+    ) -> tuple[WindowResult, Arrangement, list[dict[str, Any]], int]:
+        chosen = adapter.preset(preset)
+        result, arranged = adapter.arrange(chosen, t_from, t_to)
+        names, taken = final_names(arranged.lanes)
+        padding = chosen.lanes.min_lanes if min_lanes is None else min_lanes
+        rows, rows_cut = frame(arranged.placements, names, taken, t_from, t_to, padding,
+                               settings.max_sublanes)  # fmt: skip
+        return result, arranged, rows, rows_cut
+
+    def _about(arranged: Arrangement) -> dict[str, Any]:
+        return {"preset": arranged.preset, "preset_revision": adapter.presets.revision,
+                "evaluated_at": arranged.evaluated_at}  # fmt: skip
+
     @api.get("/clips")
     def clips(
         t_from: FROM,
         t_to: TO,
         status: Annotated[str | None, Query(pattern=r"^[a-z]+(,[a-z]+)*$")] = None,
+        preset: PRESET = None,
     ) -> dict[str, Any]:
-        """Runs overlapping ``[from, to)``, one row per run (seconds); ``status``
-        keeps only runs with one of these comma-separated statuses."""
+        """Runs overlapping ``[from, to)`` that the preset places, one row per
+        run (seconds), with every placement; ``status`` keeps only runs with
+        one of these comma-separated statuses."""
         check_window(t_from, t_to)
         wanted = None if status is None else set(status.split(","))
         if wanted is not None and not wanted <= {s.value for s in Status}:
             raise HTTPException(422, f"status must be among {', '.join(s.value for s in Status)}")
-        result = timeline.window(t_from, t_to)
+        result, arranged = adapter.arrange(adapter.preset(preset), t_from, t_to)
+        names, _ = final_names(arranged.lanes)
         now = clock()
-        names = lane_names([c.lane_key for c in result.clips])
+        by_run: dict[tuple[str, str], list[Any]] = {}
+        for p in arranged.placements:
+            by_run.setdefault((p.clip.root, p.clip.uid), []).append(p)
+        rows = []
+        ordered = sorted(by_run.items(), key=lambda kv: (kv[1][0].clip.start, kv[0][1], kv[0][0]))
+        for _, placed in ordered:
+            clip, first = placed[0].clip, placed[0].lane
+            if wanted is not None and clip.status.value not in wanted:
+                continue
+            row = clip.as_row(first.id, names[first.id])
+            row["placements"] = [
+                {
+                    "preset": p.lane.preset,
+                    "track": p.lane.track,
+                    "lane_id": p.lane.id,
+                    "lane": names[p.lane.id],
+                    "label": p.label,
+                }  # fmt: skip
+                for p in placed
+            ]
+            rows.append(row)
         return {
             "from": t_from,
             "to": t_to,
-            "clips": [
-                c.as_row(names[c.lane_key])
-                for c in sorted(result.clips, key=lambda c: (c.start, c.uid))
-                if wanted is None or c.status.value in wanted
-            ],
+            **_about(arranged),
+            "clips": rows,
             "truncated": result.truncated,
             "unplaceable": result.unplaceable,
             "sources": [_fetch_row(f, now) for f in result.fetches],
@@ -140,30 +205,50 @@ def router(adapter: Adapter) -> APIRouter:
 
     @api.get("/clips/frame")
     def clips_frame(
-        t_from: FROM, t_to: TO, min_lanes: Annotated[int, Query(ge=0, le=20)] = 0
+        t_from: FROM,
+        t_to: TO,
+        min_lanes: Annotated[int | None, Query(ge=0, le=20)] = None,
+        preset: PRESET = None,
     ) -> list[dict[str, Any]]:
-        """The timeline frame of plan §8 (milliseconds), lanes final, padded with
-        empty lanes up to ``min_lanes``. Whether it is complete is ``/clips/status``."""
+        """The timeline frame of plan §8 (milliseconds) in the preset's lanes,
+        final, padded with empty rows up to ``min_lanes`` (default: the
+        preset's). Whether it is complete is ``/clips/status``."""
         check_window(t_from, t_to)
-        return frame(timeline.window(t_from, t_to).clips, t_from, t_to, min_lanes)
+        return _drawn(preset, t_from, t_to, min_lanes)[2]
 
     @api.get("/clips/status")
-    def clips_status(t_from: FROM, t_to: TO) -> dict[str, Any]:
-        """Is the window's data complete? ``issues`` lists every reason it is
-        not (one ``complete`` row if it is), worst first."""
+    def clips_status(t_from: FROM, t_to: TO, preset: PRESET = None) -> dict[str, Any]:
+        """Is the window's data complete, as the preset draws it? ``issues``
+        lists every reason it is not (one ``complete`` row if it is), worst
+        first."""
         check_window(t_from, t_to)
-        result = timeline.window(t_from, t_to)
+        result, arranged, rows, rows_cut = _drawn(preset, t_from, t_to, 0)
         now = clock()
-        issues = sorted(_issues(result, settings, now), key=lambda i: -_SEVERITY[i[0]])
+        issues = sorted(
+            [*_issues(result, settings, now), *_arrangement_issues(arranged, rows_cut, settings)],
+            key=lambda i: -_SEVERITY[i[0]],
+        )
         state = issues[0][0] if issues else "complete"
         if not issues:
             roots = len(result.fetches)
             issues = [
                 ("complete", "",
-                 f"{len(result.clips)} runs from {roots} root(s), read now; open runs "
-                 f"from up to {settings.open_run_horizon_days:g} days before the range end")
+                 f"{len(result.clips)} runs from {roots} root(s), read now, in "
+                 f"{len(arranged.lanes)} lane(s); open runs from up to "
+                 f"{settings.open_run_horizon_days:g} days before the range end")
             ]  # fmt: skip
         return {
+            **_about(arranged),
+            "matched_runs": arranged.matched,
+            "out_of_scope": arranged.out_of_scope,
+            "placements": len(arranged.placements),
+            "lanes": len(arranged.lanes),
+            "rows": len({r["lane"] for r in rows}),
+            "lanes_cut": arranged.lanes_cut,
+            "placements_cut": arranged.placements_cut,
+            "rows_cut": rows_cut,
+            "streams_unknown": arranged.streams_unknown,
+            "invalid_groups": arranged.invalid_groups,
             "from": t_from,
             "to": t_to,
             "state": state,

@@ -48,8 +48,11 @@ services:
       ETT_TILED_API_KEY_FILE: /secrets/adapter.key
       ETT_CATALOG_ROOTS: ${ETT_CATALOG_ROOTS:-}
       ETT_QUEUES: ${ETT_QUEUES:-}
+      ETT_PRESETS_DIR: /presets
+      ETT_DEFAULT_PRESET: ${ETT_DEFAULT_PRESET:-instruments}
     volumes:
       - ${ETT_SECRETS:-adapter-key}:/secrets:ro
+      - ${ETT_PRESETS:-./presets}:/presets:ro
     depends_on:
       demo-bootstrap:
         condition: service_completed_successfully

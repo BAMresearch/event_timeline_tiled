@@ -1,12 +1,16 @@
-"""Lanes, sub-lanes and the frame (plan §3.1, §8), from run records."""
+"""Sub-lanes and the frame (plan §3.1, §8), in the default preset's lanes."""
 
 from typing import Any
 
-from event_timeline_tiled.clips import Clip, LaneKey, frame, lane_key, lane_names, make_clip
+from event_timeline_tiled.clips import Clip, make_clip
+from event_timeline_tiled.clips import frame as draw_frame
+from event_timeline_tiled.lanes import arrange, final_names
 from event_timeline_tiled.layout import RunRecord
-from event_timeline_tiled.run_state import Activity, Role, Status
+from event_timeline_tiled.presets import load_registry
+from event_timeline_tiled.run_state import Activity, Status
 
 QUIET = Activity(None, None, False)
+DEFAULT = load_registry().get("instruments")
 
 
 def run(key: str, start: float, stop: float | None, root: str = "", **md: Any) -> RunRecord:
@@ -20,25 +24,19 @@ def clip(
 ) -> Clip:
     c = make_clip(r, act, stale, r.key, observed_at)
     assert c is not None
+    RECORDS[(c.root, c.uid)] = r
     return c
 
 
-def test_lane_key_and_fallback() -> None:
-    assert lane_key(run("a", 0, 1)).as_text() == "BAM/MOUSE/-/acquisition"
-    proc = run("p", 0, 1, kind="modacor_correction", station="2")
-    assert lane_key(proc) == LaneKey("BAM", "MOUSE", "2", Role.PROCESSING)
-    bare = RunRecord("", "x", {"uid": "x", "time": 0}, None)
-    assert lane_key(bare).instrument == "(unknown)"
-    assert lane_key(RunRecord("runs/b", "x", {"uid": "x", "time": 0}, None)).instrument == (
-        "(runs/b)"
-    )
+RECORDS: dict[tuple[str, str], RunRecord] = {}
 
 
-def test_lane_names_disambiguate_by_facility() -> None:
-    a = LaneKey("BAM", "X", None, Role.ACQUISITION)
-    b = LaneKey("OTHER", "X", None, Role.ACQUISITION)
-    p = LaneKey("BAM", "X", "1", Role.PROCESSING)
-    assert lane_names([a, b, p]) == {a: "BAM X", b: "OTHER X", p: "X 1 · processing"}
+def frame(
+    clips: list[Clip], t_from: float, t_to: float, min_lanes: int = 0, max_rows: int | None = None
+) -> list[dict[str, Any]]:
+    arranged = arrange(DEFAULT, clips, RECORDS, 0.0, lambda r: None, 100, 20_000)
+    names, taken = final_names(arranged.lanes)
+    return draw_frame(arranged.placements, names, taken, t_from, t_to, min_lanes, max_rows)[0]
 
 
 def test_overlaps_get_sub_lanes_and_touching_clips_share() -> None:
@@ -49,7 +47,8 @@ def test_overlaps_get_sub_lanes_and_touching_clips_share() -> None:
         clip(run("d", 160, 170)),  # overlaps a and b
     ]
     rows = {r["uid"]: r["lane"] for r in frame(clips, 0, 1000)}
-    assert rows == {"a": "MOUSE", "b": "MOUSE /2", "c": "MOUSE", "d": "MOUSE /3"}
+    m = "MOUSE · acquisition"
+    assert rows == {"a": m, "b": f"{m} /2", "c": m, "d": f"{m} /3"}
 
 
 def test_frame_units_open_runs_and_widening() -> None:
@@ -69,7 +68,7 @@ def test_widening_never_covers_the_next_clip() -> None:
     rest, pulse = clip(run("r", 0, 1)), clip(run("p", 1.5, 18.5))
     for window in (600, 3600):
         rows = {r["uid"]: r for r in frame([rest, pulse], -window + 20, 20)}
-        assert rows["r"]["lane"] == rows["p"]["lane"] == "MOUSE", window
+        assert rows["r"]["lane"] == rows["p"]["lane"] == "MOUSE · acquisition", window
         assert rows["r"]["stop"] <= rows["p"]["start"] == 1_500
         assert (rows["p"]["start"], rows["p"]["stop"]) == (1_500, 18_500)
     rows = {r["uid"]: r for r in frame([rest, pulse], 0, 3600)}
@@ -105,9 +104,9 @@ def test_lanes_are_grouped_acquisition_before_processing() -> None:
         clip(run("m", 0, 40)),
     ]
     assert [r["lane"] for r in frame(clips, 0, 100)] == [
-        "MOUSE",
+        "generic · acquisition",
+        "MOUSE · acquisition",
         "MOUSE · processing",
-        "generic",
     ]
 
 
@@ -120,38 +119,20 @@ def test_status_of_clip() -> None:
     assert clip(aborted).status is Status.ABORTED
 
 
-def test_lane_keys_are_unambiguous() -> None:
-    missing = LaneKey(None, "X", None, Role.ACQUISITION)
-    dash = LaneKey("-", "X", "-", Role.ACQUISITION)
-    slash = LaneKey("A/B", "X", None, Role.ACQUISITION)
-    assert missing.as_text() == "-/X/-/acquisition"
-    assert dash.as_text() == "%2D/X/%2D/acquisition"
-    assert slash.as_text() == "A%2FB/X/-/acquisition"
-    other = LaneKey("A", "B/X", None, Role.ACQUISITION)
-    texts = {k.as_text() for k in (missing, dash, slash, other)}
-    assert len(texts) == 4
-
-
-def test_different_lane_keys_never_share_a_name() -> None:
-    a = LaneKey("A", "X Y", None, Role.ACQUISITION)
-    b = LaneKey("A", "X", "Y", Role.ACQUISITION)
-    c = LaneKey("B", "X Y", None, Role.ACQUISITION)
-    names = lane_names([c, b, a])
-    assert len(set(names.values())) == 3
-    assert names == lane_names([a, b, c])  # the same names whatever the order
-
-
 def test_sub_lanes_never_take_another_lanes_name() -> None:
-    # An instrument literally called "X /2" next to X's second sub-lane.
+    # A station literally called "acquisition /2" next to X's second sub-lane.
     clips = [
         clip(run("a", 100, 200, instrument="X")),
         clip(run("b", 150, 250, instrument="X")),
-        clip(run("c", 150, 250, instrument="X /2")),
+        clip(
+            run("c", 150, 250, instrument="X", station="acquisition /2", kind="modacor_correction")
+        ),
     ]
     rows = frame(clips, 0, 1000)
     lanes = {r["uid"]: r["lane"] for r in rows}
-    assert lanes["a"] == "X" and lanes["c"] == "X /2"
-    assert lanes["b"] not in {"X", "X /2"} and lanes["b"].startswith("X /2")
+    second = "X · acquisition /2 · processing"
+    assert lanes["a"] == "X · acquisition" and lanes["c"] == second
+    assert lanes["b"] == "X · acquisition /2" and lanes["b"] not in {lanes["a"], second}
     # One final lane, one lane key: no overlapping clips in one series.
     by_lane: dict[str, set[str]] = {}
     for r in rows:
@@ -194,3 +175,19 @@ def test_few_lanes_are_padded_with_empty_lanes_below() -> None:
     assert all(r["start"] == r["stop"] == 0 and r["state"] is None for r in empty)
     assert set(empty[0]) == set(real[0])  # the same columns, for Grafana
     assert frame(clips, 0, 1000, min_lanes=2) == real == frame(clips, 0, 1000, min_lanes=0)
+
+
+def test_rows_carry_the_placement_and_respect_the_row_budget() -> None:
+    clips = [clip(run("a", 100, 200)), clip(run("b", 150, 250)), clip(run("g", 0, 10,
+             instrument="zz"))]  # fmt: skip
+    rows = frame(clips, 0, 1000)
+    assert {r["track"] for r in rows} == {"runs"} and {r["root"] for r in rows} == {"/"}
+    assert (
+        rows[0]["lane_id"].startswith("instruments.runs.")
+        and len({r["lane_id"] for r in rows}) == 2
+    )
+    arranged = arrange(DEFAULT, clips, RECORDS, 0.0, lambda r: None, 100, 20_000)
+    names, taken = final_names(arranged.lanes)
+    kept, left_out = draw_frame(arranged.placements, names, taken, 0, 1000, 0, max_rows=2)
+    # Rows in lane order: MOUSE and its second sub-lane fit, zz does not.
+    assert {r["uid"] for r in kept} == {"a", "b"} and left_out == 1

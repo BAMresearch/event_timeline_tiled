@@ -22,6 +22,12 @@ MAX_POINTS = Annotated[int, Query(ge=10, le=20_000)]
 AXIS = Annotated[int | None, Query(ge=1, le=2)]
 FROM = Annotated[float, Query(alias="from")]
 TO = Annotated[float, Query(alias="to")]
+PRESET = Annotated[str | None, Query(pattern=r"^[a-z][a-z0-9-]{0,63}$")]
+"""A preset id; omitted: the deployment's default preset."""
+LANE = Annotated[str | None, Query(pattern=r"^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.[0-9a-f]{12}$")]
+"""A logical lane's id (:func:`event_timeline_tiled.lanes.lane_id`)."""
+ROOT = Annotated[str | None, Query(max_length=1000)]
+"""A run's catalogue root as ``/clips`` gives it (``/`` for the server root)."""
 
 NO_SELECTION = "Select a run on the timeline or in Runs in range"
 # A selection from a bookmark, a shared link or another Tiled: a message, not an error.
@@ -56,6 +62,9 @@ def ms(seconds: Any) -> int | None:
     if isinstance(seconds, bool) or not isinstance(seconds, int | float):
         return None
     return round(seconds * 1000) if math.isfinite(seconds) else None
+
+
+AMBIGUOUS = "The selected run's key is under several catalogue roots: select it on the timeline"
 
 
 def unselected(uid: str) -> str:

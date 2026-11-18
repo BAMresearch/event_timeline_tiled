@@ -15,6 +15,7 @@ browser ──► proxy (nginx) ──► Grafana ──► Infinity data source
 | Clips | `src/event_timeline_tiled/clips.py` | Lane keys and names, sub-lanes, the Grafana frame |
 | Queue status | `src/event_timeline_tiled/queues.py` | Read-only RE Manager status ([queue status](queues.md)) |
 | Run state | `src/event_timeline_tiled/run_state.py` | Status, role and activity, defined once |
+| Presets | `src/event_timeline_tiled/presets/` | Which runs, which lanes, which labels: the YAML subset, validation, predicates, templates, the registry ([presets](presets.md)) |
 | View table | `src/event_timeline_tiled/views.py` | The only instrument knowledge: views, labels, stall thresholds |
 | Layout | `src/event_timeline_tiled/layout.py` | The Bluesky-in-Tiled layout and query choices |
 | Tiled access | `src/event_timeline_tiled/tiled_http.py` | The only module that sends requests to Tiled: paging, errors, health |

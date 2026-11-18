@@ -8,10 +8,14 @@ from typing import Any
 import httpx
 
 from event_timeline_tiled.clips import frame
+from event_timeline_tiled.lanes import arrange, final_names
 from event_timeline_tiled.layout import Layout, RunRecord
+from event_timeline_tiled.presets import load_registry
 from event_timeline_tiled.settings import Settings
 from event_timeline_tiled.tiled_http import TiledReader
 from event_timeline_tiled.timeline import Timeline
+
+DEFAULT = load_registry().get("instruments")
 
 
 def item(key: str, start: float, stop: float | None = None, **md: Any) -> dict[str, Any]:
@@ -65,7 +69,10 @@ def _timeline(upstream: Upstream, clock: list[float], roots: tuple[str, ...] = (
 
 
 def _rows(result: Any, t_from: float = 0, t_to: float = 10_000) -> dict[str, dict[str, Any]]:
-    return {r["uid"]: r for r in frame(result.clips, t_from, t_to)}
+    arranged = arrange(DEFAULT, result.clips, result.records, t_to, lambda r: None, 100, 20_000)
+    names, taken = final_names(arranged.lanes)
+    rows, _ = frame(arranged.placements, names, taken, t_from, t_to)
+    return {r["uid"]: r for r in rows}
 
 
 def test_failure_shows_last_good_runs_as_stale() -> None:
@@ -208,3 +215,40 @@ def test_event_columns_come_back_in_seq_num_order() -> None:
         "time": [10.0, 20.0, 30.0],
         "x": [1, 2, 3],
     }
+
+
+def test_coverage_is_per_scope() -> None:
+    """Preset B's success never certifies preset A's runs (presets.md §8)."""
+    upstream = Upstream({"": [item("a", 50, 60)]})
+    clock = [100.0]
+    tl = _timeline(upstream, clock)
+    scope = [("start.instrument", ("MOUSE",))]
+    assert tl.window(0, 1000, scope=scope, scope_key="A").fetches[0].ok
+    clock[0] = 200.0
+    tl.window(0, 1000, scope=[("start.instrument", ("X",))], scope_key="B")
+    upstream.down.add("")
+    clock[0] = 300.0
+    [fetch] = tl.window(0, 1000, scope=scope, scope_key="A").fetches
+    assert (fetch.ok, fetch.last_success) == (False, 100.0)  # A's own success, not B's
+    assert [s.last_success for s in tl.sources()] == [None]  # the unscoped state: never fetched
+
+
+def test_scope_is_sent_only_to_proven_tiled_versions() -> None:
+    for version, sent in (("0.2.21", True), ("0.2.7", False)):
+        searches: list[httpx.QueryParams] = []
+
+        def handler(
+            request: httpx.Request,
+            version: str = version,
+            searches: list[httpx.QueryParams] = searches,
+        ) -> httpx.Response:
+            if request.url.path == "/api/v1/":
+                return httpx.Response(200, json={"library_version": version})
+            searches.append(request.url.params)
+            return httpx.Response(200, json={"data": [], "links": {"next": None}})
+
+        settings = Settings(tiled_url="http://tiled.test", tiled_api_key="k")
+        layout = Layout(TiledReader(settings, transport=httpx.MockTransport(handler)))
+        layout.window_runs("", 0, 1000, 86400, 10, [("start.instrument", ("MOUSE", "X"))])
+        filtered = ["filter[in][condition][key]" in params for params in searches]
+        assert filtered == [sent, sent], version
