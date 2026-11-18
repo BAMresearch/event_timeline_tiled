@@ -78,6 +78,7 @@ def test_frame_has_final_lanes_in_milliseconds(api: tuple[TestClient, dict[str, 
         "lane", "start", "stop", "state", "status", "uid", "label",
         "clip_from_ms", "clip_to_ms", "possibly_stalled", "stale",
         "zoom_from_ms", "zoom_to_ms", "activity_error", "lane_id", "track", "root",
+        "stream", "stream_from_ms", "stream_to_ms",
     ]  # fmt: skip
     window_end_ms = manifest["window"][1] * 1000
     by_uid = {r["uid"]: r for r in rows}

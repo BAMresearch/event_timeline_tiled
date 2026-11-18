@@ -6,7 +6,9 @@ Status: draft 4, 2026-11-18: after Codex review 07
 today's timeline becomes an ordinary preset; one lane can be unfolded into
 its streams) and follow-up review 08
 ([response](reviews/response-08-presets-follow-up.md),
-[disposition](reviews/disposition-08.md)). Not yet built. Plan §9 step 8:
+[disposition](reviews/disposition-08.md)). Built: presets, lanes and endpoints
+(parts 1–2), the dashboard picker, links and unfolding (part 3), and the
+first layout variant, the *Overview* dashboard (part 4). Plan §9 step 8:
 let a deployment choose which runs the timeline shows, how they are grouped
 into lanes and labelled, and how the dashboard is laid out, without code
 changes. Starting point: the earlier configuration contract,

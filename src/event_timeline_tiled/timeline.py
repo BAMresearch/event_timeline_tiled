@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from attrs import define, field, frozen
 
 from .clips import Clip, make_clip
-from .layout import Layout, RunRecord, Scope
+from .layout import Layout, RunRecord, Scope, StreamExtent, StreamState
 from .run_state import Activity, Status, activity, status_of
 from .settings import Settings
 from .tiled_http import HealthStatus, SourceError
@@ -30,6 +30,8 @@ MAX_CACHED_RUNS = 50_000
 """Runs kept per root for stale display; beyond it the least recently observed go."""
 MAX_ACTIVITY_ENTRIES = 10_000
 """Open runs whose last activity read is remembered; least recently used go."""
+MAX_EXTENT_ENTRIES = 5_000
+"""Runs whose stream extents (unfolding) are remembered; least recently used go."""
 MAX_STREAM_ENTRIES = 50_000
 """Closed runs whose stream names were read from Tiled (no ``num_events``)."""
 _STRIPES = 64
@@ -96,6 +98,26 @@ class _Observed:
     """Stream names from the latest successful read (kept across failures)."""
 
 
+@frozen
+class RunExtents:
+    """A run's stream extents as last read (presets.md §6.5)."""
+
+    streams: tuple[StreamExtent, ...]
+    observed_at: float
+    final: bool
+    """A finished run read completely: kept until evicted (or revalidated)."""
+    stop_id: str
+    stale: bool = False
+    """The latest read failed; these are the last good extents."""
+    error: str | None = None
+
+
+def _stop_id(run: RunRecord) -> str:
+    if run.stop is None:
+        return ""
+    return f"{run.stop.get('uid')}|{run.stop.get('time')}|{run.stop.get('exit_status')}"
+
+
 class Timeline:
     def __init__(
         self, settings: Settings, layout: Layout, clock: Callable[[], float] = time.time
@@ -108,6 +130,7 @@ class Timeline:
         self._sources = {(root, ""): SourceState(root) for root in self.roots}
         self._activity: OrderedDict[tuple[str, str], _Observed] = OrderedDict()
         self._closed_streams: OrderedDict[tuple[str, str], tuple[str, ...]] = OrderedDict()
+        self._extents: OrderedDict[tuple[str, str], RunExtents] = OrderedDict()
         self._stripes = [threading.Lock() for _ in range(_STRIPES)]
 
     def sources(self) -> list[SourceState]:
@@ -265,6 +288,44 @@ class Timeline:
             while len(self._closed_streams) > MAX_STREAM_ENTRIES:
                 self._closed_streams.popitem(last=False)
         return names
+
+    def extents_of(self, run: RunRecord, now: float) -> RunExtents:
+        """The run's stream extents for unfolding, read at most once per
+        ``activity_refresh_s`` while it is open. The first sight of it closed
+        forces a fresh read; only a complete one (every stream drawn or empty,
+        row counts as the stop document says) is kept as final. A failed read
+        returns the last good extents, marked stale. Concurrent requests for
+        one run wait for a single read."""
+        settings = self.settings
+        key, stop_id = (run.root, run.key), _stop_id(run)
+        with self._stripes[hash(("extents", key)) % _STRIPES]:
+            with self._lock:
+                cached = self._extents.get(key)
+            if cached is not None and cached.stop_id == stop_id:
+                age = now - cached.observed_at
+                revalidate = settings.unfold_revalidate_s
+                if cached.final and (not revalidate or age < revalidate):
+                    return cached
+                if not cached.final and age < settings.activity_refresh_s:
+                    return cached
+            try:
+                streams = self.layout.stream_extents(
+                    run, settings.unfold_max_streams, settings.unfold_max_events
+                )
+            except SourceError as exc:
+                if cached is not None:
+                    return RunExtents(cached.streams, cached.observed_at, False, cached.stop_id,
+                                      True, exc.status.value)  # fmt: skip
+                return RunExtents((), now, False, stop_id, False, exc.status.value)
+            done = {StreamState.DRAWN, StreamState.EMPTY}
+            final = run.stop is not None and all(e.state in done for e in streams)
+            entry = RunExtents(streams, now, final, stop_id)
+            with self._lock:
+                self._extents[key] = entry
+                self._extents.move_to_end(key)
+                while len(self._extents) > MAX_EXTENT_ENTRIES:
+                    self._extents.popitem(last=False)
+            return entry
 
     def _remembered(self, run: RunRecord) -> float | None:
         with self._lock:

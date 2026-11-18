@@ -26,6 +26,9 @@ provisions; the JSON stays committed and declarative, and a test fails if it
 differs from the generator's output. The first generated file equals the
 earlier one as data (only the key order of one row changed).
 
+Since step 8 part 4 (2026-11-18) the generator also writes `overview.json`;
+both dashboards are laid out from the panels in `timeline_panels.py`.
+
 ## D-009 — Corrected data in a row of fixed panels (2026-11-17)
 
 Plan §8 left open how the dashboard switches between view kinds (table,

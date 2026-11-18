@@ -119,3 +119,22 @@ presets (docs/design/presets.md); nobody used the old names yet.
 - New: `/presets`, `/selection/runs`, `preset` and `lane` parameters, and the
   settings `ETT_PRESETS_DIR`, `ETT_DEFAULT_PRESET`, `ETT_MAX_LANES`,
   `ETT_MAX_SUBLANES`, `ETT_MAX_PLACEMENTS`.
+
+Presets, step 8 part 3 (2026-11-18):
+
+- `/clips/frame` and `/clips/status` take `unfold`; the frame has the new
+  fields `stream`, `stream_from_ms`, `stream_to_ms`, and `/clips/status` the
+  new field `unfold`. Additive.
+- `lane`, `unfold` and `root` accept an empty value as "none".
+- The shipped `instruments` preset has `lanes.min_lanes: 4`; the dashboard no
+  longer sends `min_lanes`, so each preset's own padding applies.
+- The Timeline dashboard has a *Preset* picker and the hidden variables
+  `root`, `lane` and `unfold`; its links carry them. `StreamInfo.has_table`
+  is now `has_scalar_fields` (internal).
+
+Presets, step 8 part 4 (2026-11-18):
+
+- A second generated dashboard, *Overview* (`ett-overview`), from generic at
+  the top to the selected run further down; *Timeline* (`ett-timeline`)
+  stays. Each links to the other in its top bar, keeping the time range and
+  the variables. Additive.

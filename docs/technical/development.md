@@ -29,14 +29,16 @@ Commits follow Conventional Commits. Keep the changelog's
 
 ## Dashboards
 
-`grafana/dashboards/timeline.json` is generated: edit
-`grafana/generator/timeline_dashboard.py` (one function per row, positions
-relative to the row) or the building blocks in `dash_parts.py`, then run
+`grafana/dashboards/timeline.json` and `overview.json` are generated: edit
+`timeline_dashboard.py` or `overview_dashboard.py` in `grafana/generator/`
+(their rows, positions relative to the row), the shared panels in
+`timeline_panels.py` (each takes its position and the dashboard's links), or
+the building blocks in `dash_parts.py`, then run
 
 ```sh
 uv run --locked python grafana/generator
 ```
 
-and commit both. A test fails if the JSON differs from the generator's
+and commit them. A test fails if a JSON file differs from the generator's
 output. Grafana provisions only the JSON, which stays declarative.
 `health.json` is still written by hand.

@@ -10,8 +10,8 @@ docker compose -f deploy/compose.yaml --profile demo up -d --build
 ```
 
 Open <http://localhost:8080>, sign in as `admin` (password `GF_ADMIN_PASSWORD`
-from `deploy/.env`) and open the **Timeline** dashboard; the history appears
-within about two minutes of the first start.
+from `deploy/.env`) and open the **Timeline** or **Overview** dashboard; the
+history appears within about two minutes of the first start.
 
 | Service | What it does |
 |---|---|

@@ -6,7 +6,31 @@ recorded on which instrument, and with what status. The timeline shows
 RE Manager reports right now, which covers what Tiled cannot: a paused queue,
 or a plan that failed before it opened a run.
 
-Sign in to Grafana with your Viewer account and open **Timeline**.
+Sign in to Grafana with your Viewer account and open **Overview** or
+**Timeline** (each links to the other at the top, keeping the time range,
+the preset and the selection). *Overview* goes from the general at the top to
+the selected run further down; *Timeline* is the full view, with every
+panel.
+
+## Overview
+
+From top to bottom:
+
+- **A narrow top row:** *Queue* and *Data status*, as on the Timeline (below).
+- **Timeline**, in the preset's lanes, with *Select run*, *Zoom to run*,
+  *Unfold lane into streams* and *Fold* on every block.
+- **Trend** of the selected run and the runs like it on the lane you
+  clicked (the line above names the lane).
+- **The selected run**, in three columns: the latest runs on its lane
+  (before a selection: the preset's runs in the range; click one to select
+  it), its streams, and its state (status, duration, reason, activity) above
+  its start and stop documents.
+- **Its curves:** the time series of its events beside its corrected curve
+  (for a measurement, its latest usable processing result's). Each says in
+  the line above it when there is nothing to draw.
+
+Failure reasons in a table, the corrected image, related runs, the readings
+table and stream fields are on the Timeline.
 
 ## Timeline
 
@@ -30,12 +54,23 @@ From top to bottom, in sections you can collapse by clicking their title
   the right; the legend gives each field's units. The line above the data
   says which view it is and whether rows were left out (a table shows at
   most 2000 rows).
-- **Timeline.** One lane per instrument (and station), with processing
-  runs on their own lane below it. Each block is one run, from its start to
-  its stop. Overlapping runs on one lane are spread over sub-lanes
-  (`MOUSE /2`). Very short runs are drawn a little wider than they are, so
-  they stay visible; their real times are in the run details. With few
-  lanes, the rest of the panel stays empty.
+- **Timeline.** The lanes come from the **preset** chosen at the top left.
+  The default, *Instruments*, has one lane per instrument (and station) and
+  role: `MOUSE · acquisition`, with `MOUSE · processing` right below it.
+  Other presets can group runs differently (by plan, by sample, failures
+  apart); a run can then appear in several lanes. Each block is one run, from
+  its start to its stop. Overlapping runs on one lane are spread over
+  sub-lanes (`MOUSE · acquisition /2`). Very short runs are drawn a little
+  wider than they are, so they stay visible; their real times are in the run
+  details. With few lanes, the rest of the panel stays empty.
+- **Unfolding a lane.** Click a block and choose *Unfold lane into streams*:
+  that lane is drawn once per stream, `MOUSE · acquisition · baseline`,
+  `… · mouse_eiger_measure`, and so on, each bar from the stream's first to
+  its last event in that run (a baseline read at the start and the end of a
+  measurement spans the whole run; it does not mean it was read
+  throughout). Runs beyond the latest 50, and runs with nothing to draw,
+  stay on a `· earlier runs` row; *Data status* says how many. *Fold* (on a
+  block, or at the top) goes back. One lane is unfolded at a time.
 - **Corrected data.** The corrected result of the selected run: for a
   measurement, its latest usable processing result (successful, with its
   product published); for a processing run, its own, with a note if it is
@@ -71,7 +106,9 @@ From top to bottom, in sections you can collapse by clicking their title
 
 **Selecting a run:** click its block on the timeline and choose *Select run*
 (or *Zoom to run* to fit the time range to it), or click its label in a
-table. The selection stays in the URL, so a link or a reload keeps it.
+table. The selection, the preset, the lane you clicked and an unfolded lane
+all stay in the URL, so a link or a reload keeps them. The trend shows the
+runs of the lane you clicked.
 Until a run is selected, the run panels say so. If the selected run is not
 in this Tiled (an old link or bookmark), *Selected run* says so; select
 another.

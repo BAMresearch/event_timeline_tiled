@@ -254,7 +254,7 @@ def _units(stream: StreamInfo | None, fields: Sequence[str]) -> dict[str, str]:
 
 
 def _table_view(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedView:
-    present = tuple(s for s in spec.streams if s in streams and streams[s].has_table)
+    present = tuple(s for s in spec.streams if s in streams and streams[s].has_scalar_fields)
     columns = tuple(
         (s, f, _units(streams[s], [f]).get(f))
         for s in present
@@ -276,11 +276,11 @@ def _series_view(spec: ViewSpec, streams: Mapping[str, StreamInfo]) -> ResolvedV
     [name] = spec.streams
     stream = streams.get(name)
     fields: list[str] = []
-    if stream is not None and stream.has_table:
+    if stream is not None and stream.has_scalar_fields:
         numeric = _scalar_fields(stream, numeric_only=True)
         fields = [f for f in stream.hints if f in numeric] if spec.hinted_only else numeric
     reason = ""
-    if stream is None or not stream.has_table:
+    if stream is None or not stream.has_scalar_fields:
         reason = f"{name} has no events"
     elif not fields:
         reason = f"{name} has no {'hinted ' if spec.hinted_only else ''}numeric fields"
@@ -335,9 +335,9 @@ def _fallback(streams: Mapping[str, StreamInfo]) -> list[ResolvedView]:
     present, else the first stream with hinted numeric fields, else the first
     stream with events, and only then ``baseline`` (Bluesky's start/end
     snapshot)."""
-    candidates = [s for s in streams.values() if s.has_table]
+    candidates = [s for s in streams.values() if s.has_scalar_fields]
     stream = streams.get("primary") if "primary" in streams else None
-    if stream is None or not stream.has_table:
+    if stream is None or not stream.has_scalar_fields:
         main = [s for s in candidates if s.name != "baseline"]
         hinted_streams = [
             s for s in main if set(s.hints) & set(_scalar_fields(s, numeric_only=True))

@@ -24,6 +24,14 @@
 - ``ETT_MAX_LANES``, ``ETT_MAX_SUBLANES``, ``ETT_MAX_PLACEMENTS``: the most
   logical lanes, final timeline rows and placements one frame may have; more
   are left out and reported (100, 200, 20000).
+- ``ETT_UNFOLD_MAX_RUNS``, ``ETT_UNFOLD_MAX_STREAMS``, ``ETT_UNFOLD_MAX_EVENTS``,
+  ``ETT_UNFOLD_TIME_S``: unfolding one lane into its streams reads at most the
+  latest so many runs, streams per run and events per stream, for at most so
+  long per request (50, 16, 200000, 10); the rest stays folded and is
+  reported.
+- ``ETT_UNFOLD_REVALIDATE_S``: re-read a finished run's stream extents after
+  this long (0: never, for producers that write all of a run before its stop
+  document, as Bluesky's ``TiledWriter`` does).
 """
 
 from __future__ import annotations
@@ -145,6 +153,11 @@ class Settings:
     max_lanes: int = field(default=100, converter=int, validator=validators.ge(1))
     max_sublanes: int = field(default=200, converter=int, validator=validators.ge(1))
     max_placements: int = field(default=20_000, converter=int, validator=validators.ge(1))
+    unfold_max_runs: int = field(default=50, converter=int, validator=validators.ge(1))
+    unfold_max_streams: int = field(default=16, converter=int, validator=validators.ge(1))
+    unfold_max_events: int = field(default=200_000, converter=int, validator=validators.ge(1))
+    unfold_time_s: float = field(default=10.0, converter=float, validator=_positive)
+    unfold_revalidate_s: float = field(default=0.0, converter=float, validator=validators.ge(0))
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -175,4 +188,9 @@ class Settings:
             max_lanes=env.get("ETT_MAX_LANES", "100"),
             max_sublanes=env.get("ETT_MAX_SUBLANES", "200"),
             max_placements=env.get("ETT_MAX_PLACEMENTS", "20000"),
+            unfold_max_runs=env.get("ETT_UNFOLD_MAX_RUNS", "50"),
+            unfold_max_streams=env.get("ETT_UNFOLD_MAX_STREAMS", "16"),
+            unfold_max_events=env.get("ETT_UNFOLD_MAX_EVENTS", "200000"),
+            unfold_time_s=env.get("ETT_UNFOLD_TIME_S", "10"),
+            unfold_revalidate_s=env.get("ETT_UNFOLD_REVALIDATE_S", "0"),
         )

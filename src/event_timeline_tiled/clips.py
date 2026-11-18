@@ -20,6 +20,7 @@ from .run_state import Activity, Role, Status, role_of, status_of
 
 if TYPE_CHECKING:
     from .lanes import Placement
+    from .unfold import Unfolded
 
 MIN_DISPLAY_FRACTION = 0.002
 """Clips shorter than this fraction of the window are widened for display
@@ -140,6 +141,13 @@ def _zoom(start: float, end: float) -> tuple[int, int]:
     return round((start - pad) * 1000), round((end + pad) * 1000)
 
 
+def _extent(clip: Clip) -> float:
+    """The end of a run's true extent (open runs: up to ``observed_at``)."""
+    if clip.status is Status.OPEN:
+        return max(clip.observed_at if clip.observed_at is not None else clip.start, clip.start)
+    return clip.stop if clip.stop is not None and clip.stop >= clip.start else clip.start
+
+
 def frame(
     placements: Sequence[Placement],
     names: dict[str, str],
@@ -148,50 +156,75 @@ def frame(
     t_to: float,
     min_lanes: int = 0,
     max_rows: int | None = None,
+    unfolded: Unfolded | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """The timeline frame: one row per placement, in lane order, with ``lane``
-    final; and how many placements the row budget left out.
+    """The timeline frame: one row per bar, in lane order, with ``lane``
+    final; and how many bars the row budget left out.
 
     - ``names``: each logical lane's final name (by lane id), already claimed
-      in ``taken``; sub-lanes and padding claim theirs from it, so no two
-      rows share a name (Grafana partitions by it).
+      in ``taken``; stream rows, sub-lanes and padding claim theirs from it,
+      so no two rows share a name (Grafana partitions by it).
+    - ``unfolded``: one lane drawn per stream (presets.md §6.5). Its unfolded
+      runs become one bar per drawable stream, on rows ``<lane> · <stream>``
+      in stream-name order, spanning the stream's earliest to latest event
+      time (also for open runs); its other runs stay on one row
+      ``<lane> · earlier runs``. Other lanes are unchanged.
     - ``start``/``stop``: display extent in **milliseconds** (Grafana time
       fields; named so they sort in this order). Open runs end at their
       ``observed_at`` (the last successful fetch of their source), never
       before their start; a closed run without a usable stop time is drawn at
-      its start. Clips shorter than :data:`MIN_DISPLAY_FRACTION` of the window
-      are widened, but never over the next clip in their sub-lane: runs queued
+      its start. Bars shorter than :data:`MIN_DISPLAY_FRACTION` of the window
+      are widened, but never over the next bar in their sub-lane: runs queued
       back to back stay in one lane at every zoom level.
-    - Sub-lanes: per logical lane, sorted by (start, root, uid), each clip
-      takes the lowest sub-lane free at its start, by **true** extent;
-      touching clips may share, clips starting at the same instant may not.
-    - ``max_rows``: the most final rows (lanes and sub-lanes); placements on
-      further rows are left out and counted.
-    - ``state``: the visible value (see :func:`display_state`).
-    - ``clip_from_ms``/``clip_to_ms``: the true extent (open runs: up to
+    - Sub-lanes: per row group, sorted by (start, root, uid), each bar takes
+      the lowest sub-lane free at its start, by **true** extent; touching
+      bars may share, bars starting at the same instant may not.
+    - ``max_rows``: the most final rows (lanes, stream rows and sub-lanes);
+      bars on further rows are left out and counted.
+    - ``state``: the visible value (see :func:`display_state`): the run's.
+    - ``clip_from_ms``/``clip_to_ms``: the run's true extent (open runs: up to
       ``observed_at``); ``zoom_from_ms``/``zoom_to_ms``: that extent padded,
-      for "Zoom to run". ``lane_id``, ``track``, ``root``: which placement.
+      for "Zoom to run". ``lane_id``, ``track``, ``root``: which placement;
+      ``stream``, ``stream_from_ms``/``stream_to_ms``: a stream bar's stream
+      and true extent (``null`` otherwise).
     - ``min_lanes``: with fewer rows, empty rows are added below, so that a
       panel of fixed height does not draw one lane as one huge bar. An empty
       row has an invisible, unique name (non-breaking spaces), ``start`` =
       ``stop`` = ``from`` and every other field null.
     """
     min_width = max(t_to - t_from, 0.0) * MIN_DISPLAY_FRACTION
-    extents = []
+    lane_order = {lane_id: n for n, lane_id in
+                  enumerate(dict.fromkeys(p.lane.id for p in placements))}  # fmt: skip
+    open_lane = unfolded.lane.id if unfolded is not None and unfolded.lane else None
+    # Bars: (placement, group, group order, start, end, stream).
+    bars: list[tuple[Placement, str, tuple[Any, ...], float, float, str | None]] = []
+    group_names: dict[str, str] = {}
     for placement in placements:
-        clip = placement.clip
-        if clip.status is Status.OPEN:
-            end = max(clip.observed_at if clip.observed_at is not None else clip.start, clip.start)
+        clip, lane_id = placement.clip, placement.lane.id
+        streams = (unfolded.extents.get((clip.root, clip.uid), ())
+                   if unfolded is not None and lane_id == open_lane else None)  # fmt: skip
+        if streams:
+            for extent in streams:
+                assert extent.first is not None and extent.last is not None
+                group = f"{lane_id}\x00{extent.stream}"
+                group_names.setdefault(group, f"{names[lane_id]} · {extent.stream}")
+                bars.append((placement, group, (lane_order[lane_id], 0, extent.stream),
+                             extent.first, extent.last, extent.stream))  # fmt: skip
+        elif lane_id == open_lane:
+            group = f"{lane_id}\x00(earlier)"
+            group_names.setdefault(group, f"{names[lane_id]} · earlier runs")
+            bars.append((placement, group, (lane_order[lane_id], 1, ""), clip.start,
+                         _extent(clip), None))  # fmt: skip
         else:
-            end = clip.stop if clip.stop is not None and clip.stop >= clip.start else clip.start
-        extents.append((placement, clip.start, end))
+            bars.append((placement, lane_id, (lane_order[lane_id], 0, ""), clip.start,
+                         _extent(clip), None))  # fmt: skip
     # Sub-lanes by true extent: (busy until, last start) per sub-lane.
     busy: dict[str, list[tuple[float, float]]] = {}
-    placed: list[tuple[Placement, float, float, int]] = []
-    for placement, start, end in sorted(
-        extents, key=lambda e: (e[1], e[0].clip.root, e[0].clip.uid)
-    ):
-        free = busy.setdefault(placement.lane.id, [])
+    placed: list[tuple[int, int]] = []  # (bar index, sub-lane)
+    for n in sorted(range(len(bars)), key=lambda n: (bars[n][3], bars[n][0].clip.root,
+                                                     bars[n][0].clip.uid)):  # fmt: skip
+        _, group, _, start, end, _ = bars[n]
+        free = busy.setdefault(group, [])
         for index, (busy_until, last_start) in enumerate(free):
             if start >= busy_until and start > last_start:
                 free[index] = (end, start)
@@ -199,43 +232,50 @@ def frame(
         else:
             free.append((end, start))
             index = len(free) - 1
-        placed.append((placement, start, end, index))
-    # Rows within the budget, in lane order.
-    order = {lane_id: n for n, lane_id in enumerate(dict.fromkeys(p.lane.id for p in placements))}
-    rows_wanted = sorted({(order[p.lane.id], i) for p, _, _, i in placed})
-    allowed = set(rows_wanted[:max_rows] if max_rows is not None else rows_wanted)
-    left_out = sum(1 for p, _, _, i in placed if (order[p.lane.id], i) not in allowed)
-    placed = [e for e in placed if (order[e[0].lane.id], e[3]) in allowed]
-    # Widen short clips up to the next start in their sub-lane (placed is in start order).
+        placed.append((n, index))
+    # Rows within the budget, in order.
+    row_order = sorted({(bars[n][2], bars[n][1], i) for n, i in placed})
+    allowed = {(g, i) for _, g, i in (row_order[:max_rows] if max_rows is not None else row_order)}
+    left_out = sum(1 for n, i in placed if (bars[n][1], i) not in allowed)
+    placed = [(n, i) for n, i in placed if (bars[n][1], i) in allowed]
+    # Widen short bars up to the next start in their sub-lane (placed is in start order).
     next_start: dict[tuple[str, int], float] = {}
     display_ends: dict[int, float] = {}
-    for position in range(len(placed) - 1, -1, -1):
-        placement, start, end, index = placed[position]
-        limit = next_start.get((placement.lane.id, index), math.inf)
-        display_ends[position] = max(end, min(start + min_width, limit))
-        next_start[(placement.lane.id, index)] = start
-    sub_lanes: dict[tuple[str, int], str] = {}
-    for lane_id, index in sorted({(e[0].lane.id, e[3]) for e in placed if e[3] > 0},
-                                 key=lambda k: (order[k[0]], k[1])):  # fmt: skip
-        sub_lanes[(lane_id, index)] = taken.claim(f"{names[lane_id]} /{index + 1}")
+    for n, index in reversed(placed):
+        _, group, _, start, end, _ = bars[n]
+        limit = next_start.get((group, index), math.inf)
+        display_ends[n] = max(end, min(start + min_width, limit))
+        next_start[(group, index)] = start
+    # Final names: stream and earlier rows, then sub-lanes, all unique.
+    rows_named: dict[tuple[str, int], str] = {}
+    for _, group, index in row_order:
+        if (group, index) not in allowed:
+            continue
+        base = names[group] if group in names else group_names[group]
+        if index == 0:
+            rows_named[(group, 0)] = base if group in names else taken.claim(base)
+    for _, group, index in row_order:
+        if (group, index) in allowed and index > 0:
+            rows_named[(group, index)] = taken.claim(f"{rows_named[(group, 0)]} /{index + 1}")
     rows: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    for position, (placement, start, end, index) in enumerate(placed):
+    for n, index in placed:
+        placement, group, order, start, end, stream = bars[n]
         clip, lane = placement.clip, placement.lane
-        name = names[lane.id] if index == 0 else sub_lanes[(lane.id, index)]
-        zoom_from, zoom_to = _zoom(clip.start, end)
+        run_end = _extent(clip)
+        zoom_from, zoom_to = _zoom(clip.start, run_end)
         rows.append(
             (
-                (order[lane.id], index, start, clip.root, clip.uid),
+                (order, index, start, clip.root, clip.uid),
                 {
-                    "lane": name,
+                    "lane": rows_named[(group, index)],
                     "start": round(start * 1000),
-                    "stop": round(display_ends[position] * 1000),
+                    "stop": round(display_ends[n] * 1000),
                     "state": display_state(clip),
                     "status": clip.status.value,
                     "uid": clip.uid,
-                    "label": placement.label,
+                    "label": f"{placement.label} · {stream}" if stream else placement.label,
                     "clip_from_ms": round(clip.start * 1000),
-                    "clip_to_ms": round(end * 1000),
+                    "clip_to_ms": round(run_end * 1000),
                     "possibly_stalled": clip.activity.possibly_stalled,
                     "stale": clip.stale,
                     "zoom_from_ms": zoom_from,
@@ -244,6 +284,9 @@ def frame(
                     "lane_id": lane.id,
                     "track": lane.track,
                     "root": clip.root or "/",
+                    "stream": stream,
+                    "stream_from_ms": round(start * 1000) if stream else None,
+                    "stream_to_ms": round(end * 1000) if stream else None,
                 },
             )
         )
@@ -262,4 +305,5 @@ def _empty_lane(name: str, at_ms: int) -> dict[str, Any]:
     return {"lane": name, "start": at_ms, "stop": at_ms, "state": None, "status": None,
             "uid": None, "label": None, "clip_from_ms": None, "clip_to_ms": None,
             "possibly_stalled": None, "stale": None, "zoom_from_ms": None, "zoom_to_ms": None,
-            "activity_error": None, "lane_id": None, "track": None, "root": None}  # fmt: skip
+            "activity_error": None, "lane_id": None, "track": None, "root": None,
+            "stream": None, "stream_from_ms": None, "stream_to_ms": None}  # fmt: skip

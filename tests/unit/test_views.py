@@ -17,7 +17,7 @@ def run(**start: Any) -> RunRecord:
 
 def stream(name: str, fields: dict[str, Any], hints: tuple[str, ...] = ()) -> StreamInfo:
     return StreamInfo(
-        name, fields, hints, has_table=any(not f.get("external") for f in fields.values())
+        name, fields, hints, has_scalar_fields=any(not f.get("external") for f in fields.values())
     )
 
 
