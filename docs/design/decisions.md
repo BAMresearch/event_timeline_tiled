@@ -3,6 +3,18 @@
 Short records of decisions made while building; the plan's §14 holds the
 maintainer's decisions from the design phase. Newest first.
 
+## D-011 — Docker or rootless Podman (2026-11-18; replaces D-004)
+
+The lab runs rootless Podman 4.6 on Ubuntu 24.04, with netavark (so
+aardvark-dns, not Docker's `127.0.0.11`) and no `podman compose`. The proxy
+now takes its resolver from the container's `/etc/resolv.conf` through the
+nginx image's own entrypoint (`NGINX_ENTRYPOINT_LOCAL_RESOLVERS`, nginx
+1.27.5), names are still resolved at request time, and images are named in
+full. The supported way to run the stack under Podman is Docker's compose
+tool against Podman's Docker-compatible socket, which reads the compose file
+as written; CI runs it with Podman 4.9.3 (Ubuntu 24.04's package, which the
+lab is asked to install). `podman-compose` is not tested.
+
 ## D-010 — The Timeline dashboard is generated, the JSON committed (2026-11-17)
 
 `timeline.json` had grown to 25 panels (2,600 lines) built by a script kept
@@ -97,7 +109,7 @@ then proves reading by fetching real data. It does not attempt a write: with
 a wrongly privileged key, a valid write request would really create a node on
 the lab server (review 04, finding 6).
 
-## D-004 — Docker only for now (2026-11-16)
+## D-004 — Docker only for now (2026-11-16; replaced by D-011)
 
 The proxy resolves Grafana and the adapter at request time through Docker's
 embedded DNS (`127.0.0.11`). Podman provides DNS differently and is untested,

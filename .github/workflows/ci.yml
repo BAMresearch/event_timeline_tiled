@@ -48,15 +48,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - name: Settings with generated secrets
-        run: |
-          umask 077
-          secret() { python3 -c "import secrets; print(secrets.token_hex(32))"; }
-          sed -e "s/^GF_ADMIN_PASSWORD=.*/GF_ADMIN_PASSWORD=$(secret)/" \
-              -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(secret)/" \
-              -e "s/^TILED_ADMIN_PASSWORD=.*/TILED_ADMIN_PASSWORD=$(secret)/" \
-              -e "s/^TILED_SECRET_KEY=.*/TILED_SECRET_KEY=$(secret)/" \
-              deploy/.env.example > deploy/.env
-          if grep -q '=change-me$' deploy/.env; then echo "unreplaced change-me"; exit 1; fi
+        run: deploy/ci_settings.sh
       - name: Compose file
         run: docker compose -f deploy/compose.yaml --profile demo config -q
       - name: Build and start
@@ -68,6 +60,45 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: docker compose -f deploy/compose.yaml --profile demo logs --tail 50
+      - name: Clean up
+        if: always()
+        run: docker compose -f deploy/compose.yaml --profile demo down -v
+
+  stack-podman:
+    # The lab runs rootless Podman (docs/technical/questions-for-it.md): the same
+    # stack and smoke test through Podman's Docker-compatible API, with Docker's
+    # compose tool, as proposed for the lab (docs/technical/demo-stack.md#podman).
+    runs-on: ubuntu-24.04
+    env:
+      DOCKER_BUILDKIT: "0"  # Podman's API serves the classic build endpoint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Settings with generated secrets
+        run: deploy/ci_settings.sh
+      - name: Rootless Podman's API socket
+        run: |
+          podman --version
+          podman info --format 'rootless={{.Host.Security.Rootless}} network={{.Host.NetworkBackend}}'
+          sock="$RUNNER_TEMP/podman.sock"
+          podman system service --time=0 "unix://$sock" > "$RUNNER_TEMP/podman.log" 2>&1 &
+          for _ in $(seq 30); do [ -S "$sock" ] && break; sleep 1; done
+          echo "DOCKER_HOST=unix://$sock" >> "$GITHUB_ENV"
+      - name: Compose talks to Podman, not to Docker
+        run: docker version --format '{{range .Server.Components}}{{.Name}} {{end}}' | tee /dev/stderr | grep -qi podman
+      - name: Build and start
+        run: docker compose -f deploy/compose.yaml --profile demo up -d --build
+      - name: Smoke test
+        run: uv run --locked python deploy/smoke_test.py
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker compose -f deploy/compose.yaml --profile demo ps -a
+          docker compose -f deploy/compose.yaml --profile demo logs --tail 50
+          for c in $(podman ps -aq); do
+            podman inspect --format '{{.Name}} {{json .State.Health}}' "$c" | cut -c1-600
+          done
+          tail -n 50 "$RUNNER_TEMP/podman.log"
       - name: Clean up
         if: always()
         run: docker compose -f deploy/compose.yaml --profile demo down -v

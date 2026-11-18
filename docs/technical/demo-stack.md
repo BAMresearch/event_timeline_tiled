@@ -26,8 +26,10 @@ within about two minutes of the first start.
 | `redis`, `re-manager` | A real RE Manager with simulated devices, for the queue panel |
 | `demo-queue` | Keeps that RE Manager busy with `demo_measurement` items (demo only) |
 
-Everything long-lived runs as uid 10001. Docker Compose only: the proxy
-relies on Docker's embedded DNS, and Podman is untested.
+Everything long-lived runs as uid 10001. The stack runs with Docker or with
+rootless Podman (below); the proxy takes its DNS server from the container's
+`/etc/resolv.conf` at start, which is Docker's embedded DNS or Podman's
+aardvark-dns.
 
 ## Keys
 
@@ -61,6 +63,38 @@ do not duplicate it; each restart of `demo-operando` opens a new run. The
 three Tiled secrets in `deploy/.env` must be at least 16 characters of
 letters, digits, `-` and `_` (Tiled refuses to start otherwise). `down -v`
 discards everything.
+
+## Podman
+
+The lab runs rootless Podman. Docker's compose tool works with it through
+Podman's Docker-compatible API; Docker itself is not needed. CI runs the
+stack and the smoke test this way (job `stack-podman`: Podman 4.9.3 on
+Ubuntu 24.04).
+
+```sh
+sudo apt install docker-compose-v2               # the compose tool only (Ubuntu 24.04)
+systemctl --user enable --now podman.socket      # Podman's API, for this user
+export DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock
+export DOCKER_BUILDKIT=0                         # Podman serves the classic build API
+docker compose -f deploy/compose.yaml --profile demo up -d --build
+```
+
+- Run it under the account that should own the stack, and enable lingering
+  for it (`sudo loginctl enable-linger <user>`), or the containers stop when
+  its last session ends.
+- Images are named in full (`docker.io/library/nginx:…`), so Podman needs
+  no unqualified-search registries.
+- Health checks are `CMD-SHELL` strings or commands without spaces in their
+  arguments: Podman's Docker-compatible API (4.9) splits a `CMD` check's
+  arguments at spaces.
+- `podman compose` (Podman 4.7 and later) calls the same compose tool, and
+  `podman-compose` is untested.
+- The demo's services wait for each other's health checks, which rootless
+  Podman runs through systemd user timers: without a user session they
+  never run. The services of a real deployment (proxy, Grafana, adapter) do
+  not wait on health checks.
+- Tests start their PostgreSQL with `docker` or `podman`, whichever answers
+  (`ETT_CONTAINER_CLI` chooses).
 
 ## Against another Tiled
 

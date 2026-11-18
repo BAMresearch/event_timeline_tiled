@@ -1,6 +1,6 @@
 # Grafana with pinned plugins installed at build time. At start-up nothing is
 # downloaded: default plugin preinstallation, auto-update and update checks are off.
-FROM grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+FROM docker.io/grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
 
 ENV GF_PATHS_PLUGINS=/opt/grafana/plugins \
     GF_PLUGINS_PREINSTALL_DISABLED=true \

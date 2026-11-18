@@ -13,6 +13,7 @@ nav:
       - Development: technical/development.md
       - Testing: technical/testing.md
       - Contract migrations: technical/migrations.md
+      - Questions for IT: technical/questions-for-it.md
   - Design:
       - Plan: design/plan.md
       - Decisions: design/decisions.md
