@@ -39,6 +39,13 @@ says why (no processing run, no usable result, the latest attempt failed).
 The row can be collapsed. Selecting a measurement shows its latest usable
 processing result there directly. Revisit in step 8 with dynamic dashboards.
 
+Correction (2026-11-18, Codex review 07, finding 14): in Grafana 13.3.1 the
+new dashboard layouts are generally available and can be file-provisioned in
+the Kubernetes-style resource format; they are not experimental, as this
+decision assumed. The fixed panels stay, for the static layouts the
+maintainer chose ([presets.md](presets.md) §11); a dynamic variant remains
+possible later.
+
 ## D-008 — Processing runs found with `Like`, checked exactly (2026-11-17, revised after review 06)
 
 Processing-runs.md §1.2 finds a measurement's processing runs with
