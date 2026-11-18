@@ -7,7 +7,10 @@ uv run --locked ruff check . && uv run --locked ruff format --check .
 uv run --locked mypy src
 ```
 
-No test contacts a production service or the lab network. Contract tests
+No test contacts a production service or the lab network. The PostgreSQL
+tests start a throwaway PostgreSQL container with `docker` or `podman`,
+whichever answers (`ETT_CONTAINER_CLI` chooses), or use the server in
+`ETT_TEST_POSTGRES_URI`. Contract tests
 start an in-process Tiled (built like Tiled's `SimpleTiledServer`, but with
 the catalogue and the tables both in SQLite, or both in PostgreSQL; never
 DuckDB, whose single shared connection fails reads made at the same time.

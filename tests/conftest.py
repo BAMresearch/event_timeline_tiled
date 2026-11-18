@@ -25,8 +25,21 @@ from urllib.parse import urlsplit, urlunsplit
 import pytest
 
 POSTGRES_IMAGE = (
-    "postgres:16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f"
+    "docker.io/library/postgres:16"
+    "@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f"
 )
+
+
+def _container_cli() -> str | None:
+    """``ETT_CONTAINER_CLI`` if set, else the first of ``docker`` and
+    ``podman`` that answers ``info`` (the two accept the same commands here)."""
+    chosen = os.environ.get("ETT_CONTAINER_CLI")
+    for cli in [chosen] if chosen else ["docker", "podman"]:
+        if shutil.which(cli) and not subprocess.run([cli, "info"], capture_output=True).returncode:
+            return cli
+    return None
+
+
 T0 = 1_700_000_000.0
 # Tiled 0.2.21's build_app() writes the single-user API key into the
 # process-wide cached settings (tiled.server.settings.get_settings), so all
@@ -125,24 +138,23 @@ def postgres_admin_url() -> Iterator[str]:
     if url:
         yield url
         return
-    if (
-        shutil.which("docker") is None
-        or subprocess.run(["docker", "info"], capture_output=True).returncode
-    ):
+    cli = _container_cli()
+    if cli is None:
         pytest.fail(
-            "PostgreSQL tests need ETT_TEST_POSTGRES_URI or a running Docker daemon; "
-            'to leave them out on purpose, run pytest -m "not postgres"'
+            "PostgreSQL tests need ETT_TEST_POSTGRES_URI, or Docker or Podman "
+            "(ETT_CONTAINER_CLI chooses); to leave them out on purpose, run "
+            'pytest -m "not postgres"'
         )
     password, port = secrets.token_hex(16), _free_port()
     container = subprocess.run(
-        ["docker", "run", "-d", "--rm", "-e", f"POSTGRES_PASSWORD={password}",
+        [cli, "run", "-d", "--rm", "-e", f"POSTGRES_PASSWORD={password}",
          "-p", f"127.0.0.1:{port}:5432", POSTGRES_IMAGE],
         capture_output=True, text=True, check=True,
     ).stdout.strip()  # fmt: skip
     try:
         yield f"postgresql://postgres:{password}@127.0.0.1:{port}/postgres"
     finally:
-        subprocess.run(["docker", "stop", container], capture_output=True)
+        subprocess.run([cli, "stop", container], capture_output=True)
 
 
 def _postgres_databases(admin_url: str) -> tuple[str, str]:

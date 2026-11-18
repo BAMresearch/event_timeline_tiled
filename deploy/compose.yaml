@@ -1,5 +1,5 @@
-# event-timeline-tiled stack. Docker Compose v2.20+ (Podman is untested: the proxy
-# relies on Docker's embedded DNS).
+# event-timeline-tiled stack. Docker Compose v2.20+, with Docker or with rootless
+# Podman through its Docker-compatible API (docs/technical/demo-stack.md#podman).
 #
 #   Demo (everything local, synthetic runs):
 #     cp deploy/.env.example deploy/.env   # then set the passwords
@@ -15,9 +15,13 @@ name: event-timeline-tiled
 
 services:
   proxy:
-    image: nginx:1.27@sha256:6784fb0834aa7dbbe12e3d7471e69c290df3e6ba810dc38b34ae33d3c1c05f7d
+    image: docker.io/library/nginx:1.27@sha256:6784fb0834aa7dbbe12e3d7471e69c290df3e6ba810dc38b34ae33d3c1c05f7d
+    environment:
+      # The resolver from the container's /etc/resolv.conf, whatever the runtime.
+      NGINX_ENTRYPOINT_LOCAL_RESOLVERS: "1"
+      NGINX_ENVSUBST_FILTER: "^NGINX_LOCAL_RESOLVERS$$"
     volumes:
-      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./proxy/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     ports:
       - "127.0.0.1:${ETT_HTTP_PORT:-8080}:8080"
     depends_on: [grafana, adapter]
@@ -56,7 +60,7 @@ services:
 
   postgres:
     profiles: [demo]
-    image: postgres:16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
+    image: docker.io/library/postgres:16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
     environment:
       POSTGRES_USER: tiled
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
@@ -153,7 +157,7 @@ services:
   # A real RE Manager with simulated devices, for the queue-status panel.
   redis:
     profiles: [demo]
-    image: redis:7.4@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90
+    image: docker.io/library/redis:7.4@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
