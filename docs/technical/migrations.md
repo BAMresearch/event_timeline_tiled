@@ -87,3 +87,8 @@ After review 06 (2026-11-17):
 - `/related`: new row field `problems`; with more processing runs than the
   cap, nothing is marked latest and `default` is `null`. `/curve`: new fields
   `source.family` and `uncertainty_invalid`.
+
+Queue progress (2026-11-18):
+
+- `/queues` has the new fields `run_active`, `run_done`, `run_total`,
+  `run_progress`, `run_text`, `run_since` and `run_from_start`. Additive.

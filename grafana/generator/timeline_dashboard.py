@@ -68,23 +68,36 @@ def status_cells(name: str) -> dict[str, Any]:
 def header() -> list[Panel]:
     """Always shown: what this is, the queues and whether the data is complete."""
     return [
-        text("", (0, 0, 6, 4), "markdown",
+        text("", (0, 0, 5, 4), "markdown",
              "**Recorded runs from Tiled.** Click a run to select it. Green "
              "success · red failed · orange aborted · blue open · yellow possibly "
              "stalled · light blue activity unknown · grey stale. "
              "[Health](/d/ett-health/timeline-health)", transparent=True),
-        panel("table", "Queue", (6, 0, 9, 4),
+        panel("table", "Queue", (5, 0, 11, 4),
               [target(f"{A}/queues", "", [
                   col("instrument"), col("state"), col("running_plan"),
-                  col("running_since", "timestamp_epoch_s"), col("items_in_queue", "number")])],
+                  col("running_since", "timestamp_epoch_s"), col("items_in_queue", "number"),
+                  col("run_progress", "number"), col("run_text")])],
+              description="Each RE Manager's state and running plan. Progress counts the plans "
+                          "finished since the queue started (or since the dashboard's adapter "
+                          "first saw it running), against those plus the plans still queued: "
+                          "plans, not time; the history before the run does not count.",
               options={"showHeader": True, "cellHeight": "sm"},
               fieldConfig={"defaults": {"noValue": "no RE Manager configured"}, "overrides": [
-                  width("items_in_queue", 115), width("instrument", 90),
-                  width("running_since", 150), width("state", 120),
-                  *blank("items_in_queue", "running_plan", "running_since"),
+                  width("items_in_queue", 64), width("instrument", 80),
+                  width("running_since", 150), width("state", 115), width("run_progress", 100),
+                  width("run_text", 70),
+                  by_name("items_in_queue", prop("displayName", "queued")),
+                  by_name("run_text", prop("displayName", "run")),
+                  by_name("run_progress", prop("displayName", "progress"),
+                          prop("unit", "percentunit"), prop("min", 0), prop("max", 1),
+                          prop("custom.cellOptions", {"type": "gauge", "mode": "basic",
+                                                      "valueDisplayMode": "text"})),
+                  *blank("items_in_queue", "running_plan", "running_since", "run_progress",
+                         "run_text"),
                   by_name("state", prop("custom.cellOptions", {"type": "color-text"}),
                           prop("mappings", value_colours(QUEUE_COLOURS)))]}),
-        panel("table", "Data status", (15, 0, 9, 4),
+        panel("table", "Data status", (16, 0, 8, 4),
               [target(f"{A}/clips/status?{RANGE}", "issues", [col("state"), col("message")])],
               options={"showHeader": False, "cellHeight": "sm"},
               fieldConfig={"defaults": {"noValue": "no status: adapter not answering"},

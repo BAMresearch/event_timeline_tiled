@@ -51,7 +51,7 @@
    "gridPos": {
     "x": 0,
     "y": 0,
-    "w": 6,
+    "w": 5,
     "h": 4
    },
    "transparent": true,
@@ -64,9 +64,9 @@
    "type": "table",
    "title": "Queue",
    "gridPos": {
-    "x": 6,
+    "x": 5,
     "y": 0,
-    "w": 9,
+    "w": 11,
     "h": 4
    },
    "datasource": {
@@ -115,10 +115,21 @@
        "selector": "items_in_queue",
        "text": "items_in_queue",
        "type": "number"
+      },
+      {
+       "selector": "run_progress",
+       "text": "run_progress",
+       "type": "number"
+      },
+      {
+       "selector": "run_text",
+       "text": "run_text",
+       "type": "string"
       }
      ]
     }
    ],
+   "description": "Each RE Manager's state and running plan. Progress counts the plans finished since the queue started (or since the dashboard's adapter first saw it running), against those plus the plans still queued: plans, not time; the history before the run does not count.",
    "options": {
     "showHeader": true,
     "cellHeight": "sm"
@@ -136,7 +147,7 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 115
+        "value": 64
        }
       ]
      },
@@ -148,7 +159,7 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 90
+        "value": 80
        }
       ]
      },
@@ -172,7 +183,87 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 120
+        "value": 115
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "run_progress"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 100
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "run_text"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 70
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "items_in_queue"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "queued"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "run_text"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "run"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "run_progress"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "progress"
+       },
+       {
+        "id": "unit",
+        "value": "percentunit"
+       },
+       {
+        "id": "min",
+        "value": 0
+       },
+       {
+        "id": "max",
+        "value": 1
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "gauge",
+         "mode": "basic",
+         "valueDisplayMode": "text"
+        }
        }
       ]
      },
@@ -204,6 +295,30 @@
       "matcher": {
        "id": "byName",
        "options": "running_since"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "run_progress"
+      },
+      "properties": [
+       {
+        "id": "noValue",
+        "value": "\u2013"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "run_text"
       },
       "properties": [
        {
@@ -263,9 +378,9 @@
    "type": "table",
    "title": "Data status",
    "gridPos": {
-    "x": 15,
+    "x": 16,
     "y": 0,
-    "w": 9,
+    "w": 8,
     "h": 4
    },
    "datasource": {
