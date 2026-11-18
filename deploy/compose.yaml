@@ -91,9 +91,9 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # 127.0.0.1, not localhost: Tiled listens on IPv4 only, and under Podman
-      # "localhost" may resolve to ::1 first; the timeout bounds each attempt.
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/', timeout=5)"]
+      # A script: Podman's Docker-compatible API splits health-check arguments
+      # at spaces, so `python -c "<code>"` would not survive it.
+      test: ["CMD", "python", "/etc/tiled/healthcheck.py"]
       interval: 3s
       retries: 60
     restart: unless-stopped

@@ -30,7 +30,7 @@ USER app
 FROM base AS tiled
 COPY pyproject.toml uv.lock README.md LICENSE.md ./
 RUN uv sync --locked --no-dev --no-install-project --group tiled-server && rm -rf /root/.cache
-COPY deploy/tiled/config.template.yml deploy/tiled/entrypoint.py /etc/tiled/
+COPY deploy/tiled/config.template.yml deploy/tiled/entrypoint.py deploy/tiled/healthcheck.py /etc/tiled/
 RUN mkdir -p /data/files /data/processed && chown -R app /data
 USER app
 EXPOSE 8000

@@ -84,6 +84,9 @@ docker compose -f deploy/compose.yaml --profile demo up -d --build
   its last session ends.
 - Images are named in full (`docker.io/library/nginx:…`), so Podman needs
   no unqualified-search registries.
+- Health checks are `CMD-SHELL` strings or commands without spaces in their
+  arguments: Podman's Docker-compatible API (4.9) splits a `CMD` check's
+  arguments at spaces.
 - `podman compose` (Podman 4.7 and later) calls the same compose tool, and
   `podman-compose` is untested.
 - The demo's services wait for each other's health checks, which rootless
