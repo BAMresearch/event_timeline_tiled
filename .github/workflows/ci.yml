@@ -95,6 +95,9 @@ jobs:
         run: |
           docker compose -f deploy/compose.yaml --profile demo ps -a
           docker compose -f deploy/compose.yaml --profile demo logs --tail 50
+          for c in $(podman ps -aq); do
+            podman inspect --format '{{.Name}} {{json .State.Health}}' "$c" | cut -c1-600
+          done
           tail -n 50 "$RUNNER_TEMP/podman.log"
       - name: Clean up
         if: always()
