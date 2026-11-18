@@ -19,7 +19,7 @@ from ..related import Family, default_result, families, family_of, problems, usa
 from ..run_state import Role, role_of, status_of
 from ..tiled_http import HealthStatus, SourceError
 from ..views import ResolvedView, ViewKind, label
-from .common import MAX_POINTS, UID, VIEW, upstream
+from .common import MAX_POINTS, ROOT, UID, VIEW, upstream
 from .state import Adapter
 
 RELATED_MAX_RUNS = 500
@@ -380,15 +380,17 @@ def router(adapter: Adapter, results: Results) -> APIRouter:
     api = APIRouter()
 
     @api.get("/runs/{uid}/related")
-    def run_related(uid: UID) -> dict[str, Any]:
+    def run_related(uid: UID, root: ROOT = None) -> dict[str, Any]:
         """A measurement's processing runs, or a processing run's measurements."""
-        return results.related(adapter.find(uid))
+        return results.related(adapter.find(uid, root))
 
     @api.get("/runs/{uid}/curve")
-    def run_curve(uid: UID, view: VIEW = None, max_points: MAX_POINTS = 2000) -> dict[str, Any]:
+    def run_curve(
+        uid: UID, root: ROOT = None, view: VIEW = None, max_points: MAX_POINTS = 2000
+    ) -> dict[str, Any]:
         """The run's curve view; for a measurement, that of its latest usable
         processing result."""
-        return results.curve(adapter.find(uid), view, max_points)
+        return results.curve(adapter.find(uid, root), view, max_points)
 
     @api.get("/runs/{uid}/image")
     @api.get("/run-images/{uid}/image")
@@ -398,11 +400,12 @@ def router(adapter: Adapter, results: Results) -> APIRouter:
         view: VIEW = None,
         scale: Scale = Scale.LOG,
         size: IMAGE_SIZE = 768,
+        root: ROOT = None,
     ) -> Response:
         """The run's image view as a PNG; for a measurement, that of its latest
         usable processing result. ``/run-images/...`` is the same, for the
         proxy's signed-in image route (plan §6)."""
-        run = adapter.find(uid)
+        run = adapter.find(uid, root)
         return results.image(run, view, scale, size, request.headers.get("if-none-match"))
 
     return api

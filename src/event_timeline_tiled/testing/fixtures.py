@@ -277,6 +277,24 @@ class FixtureWriter:
         writer = TiledWriter(self.client, batch_size=n_events + 1)
         return self._write_captured(plan(), start, None, "success", writer=writer)
 
+    def same_run_in(
+        self, containers: Sequence[Any], md: dict[str, Any], start: float, stop: float
+    ) -> str:
+        """One RunEngine run written, unchanged, into each of ``containers``
+        (catalogue roots): the same run key in several roots."""
+        sig = self._signals["env_temperature"]
+
+        @bpp.run_decorator(md=md)
+        def plan() -> Iterator[Any]:
+            yield from bps.trigger_and_read([sig], name="primary")
+
+        docs = self._capture(plan(), start, stop, "success")
+        for container in containers:
+            writer = TiledWriter(container, batch_size=1)
+            for name, doc in docs:
+                writer(name, copy.deepcopy(doc))
+        return str(docs[0][1]["uid"])
+
     def _write_captured(
         self,
         plan: Any,
@@ -286,6 +304,20 @@ class FixtureWriter:
         writer: TiledWriter | None = None,
         descriptor_hints: dict[str, dict[str, Any]] | None = None,
     ) -> str:
+        docs = self._capture(plan, start, stop, exit_status, descriptor_hints)
+        for name, doc in docs:
+            (writer or self._writer)(name, doc)
+        return str(docs[0][1]["uid"])
+
+    def _capture(
+        self,
+        plan: Any,
+        start: float,
+        stop: float | None,
+        exit_status: ExitStatus,
+        descriptor_hints: dict[str, dict[str, Any]] | None = None,
+    ) -> list[Doc]:
+        """The run's documents, retimed; without a stop document if ``stop`` is ``None``."""
         docs: list[Doc] = []
         token = self._re.subscribe(lambda name, doc: docs.append((name, copy.deepcopy(doc))))
         try:
@@ -293,6 +325,7 @@ class FixtureWriter:
         finally:
             self._re.unsubscribe(token)
         docs = _retime(docs, start, stop if stop is not None else start + 60.0)
+        out: list[Doc] = []
         for name, doc in docs:
             if name == "stop":
                 if stop is None:
@@ -302,8 +335,8 @@ class FixtureWriter:
                     doc["reason"] = f"synthetic {exit_status}"
             if name == "descriptor" and doc["name"] in (descriptor_hints or {}):
                 doc["hints"] = (descriptor_hints or {})[doc["name"]]
-            (writer or self._writer)(name, doc)
-        return str(docs[0][1]["uid"])
+            out.append((name, doc))
+        return out
 
     # Processing runs --------------------------------------------------------------------
 

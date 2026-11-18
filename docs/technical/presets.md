@@ -4,14 +4,17 @@ A preset says which runs the timeline shows, how they are grouped into lanes
 and how clips are labelled. This page is the reference for writing one. The
 design and its reasons are in [presets and layout](../design/presets.md).
 
-**Status:** the format, its loader and its predicates are built and tested.
-The adapter does not use presets yet: lanes, the `preset` parameter and the
-dashboard picker follow in the next parts of step 8.
+**Status:** presets decide the adapter's lanes (`preset=<id>` on the
+endpoints, [endpoints](endpoints.md)); the dashboard picker and unfolding a
+lane into streams follow in the next part of step 8.
 
 ## Files
 
 One preset per file, `*.yaml` or `*.yml`, in the directory `ETT_PRESETS_DIR`
-names. All files are loaded at start; one bad file stops the adapter with its
+names (in the stack: `deploy/presets/`, or the host directory `ETT_PRESETS`
+in `deploy/.env` names). `ETT_DEFAULT_PRESET` chooses the preset used when a
+request names none. Budgets: `ETT_MAX_LANES` (100), `ETT_MAX_SUBLANES` (200)
+and `ETT_MAX_PLACEMENTS` (20,000) per frame; more is left out and reported. All files are loaded at start; one bad file stops the adapter with its
 file name, line, column and the path of the problem (`tracks[1].where.op`).
 The package ships one preset, `instruments` (one lane per instrument and
 role): its id is reserved, so copy it under another id to change it.

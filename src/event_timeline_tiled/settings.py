@@ -16,6 +16,14 @@
   For HTTP, the API key (scopes ``read:status``, ``read:queue``) comes from
   the file named by ``ETT_QUEUE_<INSTRUMENT>_API_KEY_FILE`` (instrument in
   upper case, other characters as ``_``).
+- ``ETT_PRESETS_DIR``: a directory of preset files (``*.yaml``), loaded at
+  start besides the shipped ``instruments``; empty: none
+  (docs/technical/presets.md).
+- ``ETT_DEFAULT_PRESET``: the preset used without a ``preset`` parameter, and
+  listed first (``instruments``).
+- ``ETT_MAX_LANES``, ``ETT_MAX_SUBLANES``, ``ETT_MAX_PLACEMENTS``: the most
+  logical lanes, final timeline rows and placements one frame may have; more
+  are left out and reported (100, 200, 20000).
 """
 
 from __future__ import annotations
@@ -69,6 +77,10 @@ def _positive(_instance: object, attribute: object, value: float) -> None:
         raise ValueError(
             f"{getattr(attribute, 'name', 'value')} must be positive and finite, got {value!r}"
         )
+
+
+def _optional_path(value: str | Path | None) -> Path | None:
+    return Path(value) if value else None
 
 
 _QUEUE = re.compile(r"^(?P<name>[A-Za-z0-9_.-]+)=(?P<transport>zmq|http):(?P<address>\S+)$")
@@ -128,6 +140,11 @@ class Settings:
     activity_refresh_s: float = field(default=60.0, converter=float, validator=_positive)
     max_runs: int = field(default=10_000, converter=int, validator=validators.ge(1))
     queues: tuple[QueueConfig, ...] = ()
+    presets_dir: Path | None = field(default=None, converter=_optional_path)
+    default_preset: str = field(default="instruments", validator=validators.min_len(1))
+    max_lanes: int = field(default=100, converter=int, validator=validators.ge(1))
+    max_sublanes: int = field(default=200, converter=int, validator=validators.ge(1))
+    max_placements: int = field(default=20_000, converter=int, validator=validators.ge(1))
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -153,4 +170,9 @@ class Settings:
             activity_refresh_s=env.get("ETT_ACTIVITY_REFRESH_S", "60"),
             max_runs=env.get("ETT_MAX_RUNS", "10000"),
             queues=parse_queues(env.get("ETT_QUEUES", ""), env),
+            presets_dir=env.get("ETT_PRESETS_DIR", "") or None,
+            default_preset=env.get("ETT_DEFAULT_PRESET", "") or "instruments",
+            max_lanes=env.get("ETT_MAX_LANES", "100"),
+            max_sublanes=env.get("ETT_MAX_SUBLANES", "200"),
+            max_placements=env.get("ETT_MAX_PLACEMENTS", "20000"),
         )

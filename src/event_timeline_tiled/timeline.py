@@ -15,12 +15,12 @@ from __future__ import annotations
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from attrs import define, field, frozen
 
 from .clips import Clip, make_clip
-from .layout import Layout, RunRecord
+from .layout import Layout, RunRecord, Scope
 from .run_state import Activity, Status, activity, status_of
 from .settings import Settings
 from .tiled_http import HealthStatus, SourceError
@@ -30,6 +30,8 @@ MAX_CACHED_RUNS = 50_000
 """Runs kept per root for stale display; beyond it the least recently observed go."""
 MAX_ACTIVITY_ENTRIES = 10_000
 """Open runs whose last activity read is remembered; least recently used go."""
+MAX_STREAM_ENTRIES = 50_000
+"""Closed runs whose stream names were read from Tiled (no ``num_events``)."""
 _STRIPES = 64
 
 
@@ -38,6 +40,10 @@ class SourceState:
     """What is known about fetching one catalogue root (plan §5.3), across requests."""
 
     root: str
+    scope: str = ""
+    """The scope sent with this root's searches (``""``: none): coverage and
+    freshness are per root and scope, so one preset's success never
+    certifies another's runs (presets.md §8)."""
     last_attempt: float | None = None
     last_success: float | None = None
     error: HealthStatus | None = None
@@ -86,6 +92,8 @@ class _Observed:
     """From the latest successful read (kept across failures)."""
     error: str | None
     """Category of the latest read's failure, ``None`` if it succeeded."""
+    streams: tuple[str, ...] | None = None
+    """Stream names from the latest successful read (kept across failures)."""
 
 
 class Timeline:
@@ -97,27 +105,44 @@ class Timeline:
         self.clock = clock
         self.roots: tuple[str, ...] = settings.catalog_roots or ("",)
         self._lock = threading.Lock()
-        self._sources = {root: SourceState(root) for root in self.roots}
+        self._sources = {(root, ""): SourceState(root) for root in self.roots}
         self._activity: OrderedDict[tuple[str, str], _Observed] = OrderedDict()
+        self._closed_streams: OrderedDict[tuple[str, str], tuple[str, ...]] = OrderedDict()
         self._stripes = [threading.Lock() for _ in range(_STRIPES)]
 
     def sources(self) -> list[SourceState]:
+        """The unscoped state of each configured root (what health reports)."""
         with self._lock:
-            return [self._sources[r] for r in self.roots]
+            return [self._sources[(r, "")] for r in self.roots]
 
-    def window(self, t_from: float, t_to: float) -> WindowResult:
+    def _state(self, root: str, scope_key: str) -> SourceState:
+        with self._lock:
+            return self._sources.setdefault((root, scope_key), SourceState(root, scope_key))
+
+    def window(
+        self,
+        t_from: float,
+        t_to: float,
+        roots: Sequence[str] | None = None,
+        scope: Scope = (),
+        scope_key: str = "",
+    ) -> WindowResult:
+        """The runs of ``[t_from, t_to)`` under ``roots`` (default: all
+        configured ones). ``scope`` (identified by ``scope_key``) narrows the
+        searches where Tiled supports it; it is a candidate set the caller
+        checks again."""
         now = self.clock()
         horizon = self.settings.open_run_horizon_days * 86400
         clips: list[Clip] = []
         records: dict[tuple[str, str], RunRecord] = {}
         unplaceable: list[str] = []
         fetches: list[SourceFetch] = []
-        for root in self.roots:
-            state = self._sources[root]
+        for root in self.roots if roots is None else roots:
+            state = self._state(root, scope_key if scope else "")
             truncated: bool | None
             try:
                 runs, truncated = self.layout.window_runs(
-                    root, t_from, t_to, horizon, self.settings.max_runs
+                    root, t_from, t_to, horizon, self.settings.max_runs, scope
                 )
                 with self._lock:
                     state.last_attempt = state.last_success = now
@@ -200,15 +225,46 @@ class Timeline:
             if cached is not None and now - cached.attempt_at < self.settings.activity_refresh_s:
                 return cached.last_event, cached.error
             try:
-                entry = _Observed(now, self.layout.last_event_time(run), None)
+                last, names = self.layout.open_run_reading(run)
+                entry = _Observed(now, last, None, names)
             except SourceError as exc:
-                entry = _Observed(now, cached.last_event if cached else None, exc.status.value)
+                entry = _Observed(now, cached.last_event if cached else None, exc.status.value,
+                                  cached.streams if cached else None)  # fmt: skip
             with self._lock:
                 self._activity[key] = entry
                 self._activity.move_to_end(key)
                 while len(self._activity) > MAX_ACTIVITY_ENTRIES:
                     self._activity.popitem(last=False)
             return entry.last_event, entry.error
+
+    def streams_of(self, run: RunRecord, now: float) -> tuple[str, ...] | None:
+        """The run's stream names, or ``None`` while they are not known
+        (presets.md §5.4): an open run's from its activity read (shared, at
+        most once per ``activity_refresh_s``); a closed run's from its stop
+        document, else read once from Tiled and kept (a closed run's streams
+        do not change). A failed read is unknown, never "no streams"."""
+        if run.stop is None:
+            self.last_event(run, now)
+            with self._lock:
+                cached = self._activity.get((run.root, run.key))
+            return cached.streams if cached else None
+        counts = run.stop.get("num_events")
+        if isinstance(counts, Mapping):
+            return tuple(sorted(str(k) for k in counts))
+        key = (run.root, run.key)
+        with self._lock:
+            known = self._closed_streams.get(key)
+        if known is not None:
+            return known
+        try:
+            names = self.layout.stream_names(run)
+        except SourceError:
+            return None
+        with self._lock:
+            self._closed_streams[key] = names
+            while len(self._closed_streams) > MAX_STREAM_ENTRIES:
+                self._closed_streams.popitem(last=False)
+        return names
 
     def _remembered(self, run: RunRecord) -> float | None:
         with self._lock:

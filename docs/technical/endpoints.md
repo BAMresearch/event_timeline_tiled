@@ -12,6 +12,21 @@ added, never redefined; incompatible changes are recorded in
   (`tiled unreachable: ConnectError`), never an upstream body.
 - `uid` and stream names are single path segments of `A-Z a-z 0-9 _ ~ . -`.
 - Windows: `from < to`, both finite, at most 400 days.
+- **Presets** ([presets](presets.md)): `preset=<id>` on `/clips`, `/clips/frame`,
+  `/clips/status`, the trend and `/selection/runs` decides which runs are
+  shown and in which lanes; without it, the deployment's default
+  (`ETT_DEFAULT_PRESET`, shipped: `instruments`). An unknown preset is `422`.
+  A run's own details, streams, data, related runs, curve and image never
+  depend on a preset.
+- **Runs by root:** every run endpoint (`/runs/{uid}/...`, `/selection/...`)
+  takes an optional `root` (as `/clips` gives it, `/` for the server root;
+  not a configured root: `422`). Without it the key is looked up in every
+  root; a key found under several roots is `409` (`/selection/...`: a notice),
+  never a guess.
+
+## `GET /presets`
+
+The loaded presets, `[{"id", "title"}]`: the default first, then by title.
 
 ## `GET /health`
 
@@ -46,13 +61,16 @@ request time; `[]` if none is configured.
 | `run_active`, `run_done`, `run_total`, `run_progress`, `run_text`, `run_since`, `run_from_start` | the queue's current or last run, in plans: done since it started (`run_from_start` false: since the adapter first saw it running), total with the queued and running plans, done ÷ total, `"3 of 12"` (`", stopped"` when it ended with plans left), and when the adapter saw it start ([queue status](queues.md)); `null` until a run has been seen, and while unreachable |
 | `last_success`, `data_age_s`, `error`, `error_detail` | when it last answered, and why not now |
 
-## `GET /clips?from&to[&status]`
+## `GET /clips?from&to[&status][&preset]`
 
-Runs overlapping `[from, to)`: the de-duplicated union of an open-run and a
-closed-run search per root (plan §5.4).
+Runs overlapping `[from, to)` that the preset places in at least one lane:
+the de-duplicated union of an open-run and a closed-run search per root of
+the preset (plan §5.4), narrowed by its `scope`, then checked against its
+tracks. One row per run.
 
 ```json
-{"from": 0, "to": 0, "clips": [...], "truncated": false, "unplaceable": [],
+{"from": 0, "to": 0, "preset": "instruments", "preset_revision": "…",
+ "evaluated_at": 0, "clips": [...], "truncated": false, "unplaceable": [],
  "sources": [{"root": "/", "ok": true, "error": null, "last_success": 0,
               "data_age_s": 0, "truncated": false, "runs": 0,
               "activity_errors": 0, "activity_error": null}]}
@@ -65,7 +83,8 @@ Each clip:
 | `uid` | the run's key in Tiled (use this to select the run) |
 | `start_uid`, `uid_mismatch` | the start document's `uid`; `true` if it differs from the key |
 | `root` | catalogue root it was found under |
-| `lane_key`, `lane` | `facility/instrument/station/role`, each part percent-encoded and `-` for a missing one (a literal `-` is `%2D`); display name, unique per lane key |
+| `lane_key`, `lane` | the run's first placement in the preset's track order: its lane id (`<preset>.<track>.<digest>`) and its name in this window |
+| `placements` | every lane the run is in: `{preset, track, lane_id, lane, label}`, in track order (a run appears in every track it matches) |
 | `role` | `acquisition` or `processing` (start `kind` is a processing kind) |
 | `start`, `stop` | start and stop document times; `stop` is `null` while open |
 | `status` | recorded outcome: `success`, `failed`, `aborted`, `unknown`, `open` |
@@ -73,7 +92,7 @@ Each clip:
 | `activity_error` | the events could not be read now (`forbidden`, `unreachable`, …): `last_event` is from an earlier read, `last_event_age_s` is `null` and `possibly_stalled` is `false` |
 | `stale` | the root could not be fetched now; this is the run as last observed |
 | `observed_at` | when this run was last fetched successfully |
-| `label` | from the view table's label keys, else the short UID |
+| `label` | from the view table's label keys, else the short UID (a track's own label template is in `placements`) |
 | `reason` | the stop document's `reason`, if any |
 
 `status=failed,aborted` keeps only runs with those statuses.
@@ -83,19 +102,25 @@ search succeeded now; `truncated` is `true` when it matched more than
 `ETT_MAX_RUNS` runs and `null` when unknown (failed now). Above the cap the
 open runs are kept first, then closed runs in Tiled's order (earliest
 written). `truncated` (top level) is true if any root was truncated.
-`unplaceable` lists runs without a usable start time.
+`unplaceable` lists runs without a usable start time. `evaluated_at` is the
+one time relative predicates were evaluated against; `preset_revision`
+changes whenever a preset file does.
 
 The two searches are not one snapshot of the catalogue. The open search goes
 first, so a run closing between them is found closed; other concurrent
 changes appear at the next refresh.
 
-## `GET /clips/status?from&to`
+## `GET /clips/status?from&to[&preset]`
 
-Whether the window's data is complete: what the Timeline page's *Data
-status* panel shows.
+Whether the window's data is complete, as the preset draws it: what the
+Timeline page's *Data status* panel shows.
 
 ```json
-{"state": "complete", "complete": true, "runs": 0, "truncated": false,
+{"preset": "instruments", "preset_revision": "…", "evaluated_at": 0,
+ "matched_runs": 0, "out_of_scope": 0, "placements": 0, "lanes": 0, "rows": 0,
+ "lanes_cut": 0, "placements_cut": 0, "rows_cut": 0, "streams_unknown": 0,
+ "invalid_groups": 0,
+ "state": "complete", "complete": true, "runs": 0, "truncated": false,
  "unplaceable": [], "open_run_horizon_days": 21, "max_runs": 10000,
  "sources": [...], "issues": [{"state": "complete", "root": "", "message": "..."}]}
 ```
@@ -103,25 +128,32 @@ status* panel shows.
 `state` is the worst of the issues: `incomplete` (a root never fetched, or
 truncated), `stale` (a root failed now; its runs are shown as last seen),
 `partial` (activity of some open runs unknown; runs without a usable start
-time), else `complete`. `issues` has one row per problem, worst first, or
+time; runs left out of tracks that need streams not known yet; list or
+mapping group values), else `complete`. Going over a lane, placement or row
+budget (`ETT_MAX_LANES`, `ETT_MAX_PLACEMENTS`, `ETT_MAX_SUBLANES`, or the
+preset's `lanes.max_lanes`) is `incomplete`: the excess is not drawn, and
+says so. `runs` counts runs in the window (each once), `matched_runs` those
+the preset places, `placements` and `lanes` what is drawn. `issues` has one row per problem, worst first, or
 one `complete` row. `sources` is as in `/clips`.
 
-## `GET /clips/frame?from&to[&min_lanes]`
+## `GET /clips/frame?from&to[&min_lanes][&preset]`
 
-The State timeline frame (plan §8), a list of rows in lane order:
+The State timeline frame (plan §8), a list of rows in the preset's lane
+order, one per placement (a run in two tracks is in two rows):
 
 | Field | Meaning |
 |---|---|
-| `lane` | final lane, unique per lane and sub-lane: sub-lanes get ` /2`, ` /3`; a name already taken gets ` (2)` |
+| `lane` | final name, unique per row: a lane's name from its preset (see [presets](presets.md)), sub-lanes with ` /2`, ` /3`, and a name already taken with ` (2)` |
 | `start`, `stop` | display extent, **ms**; open runs end at their `observed_at`; a closed run without a usable stop time is drawn at its start; very short clips are widened to 0.2 % of the window, but never over the next clip in their sub-lane |
 | `state` | the visible value: `status`, except `stale`, `activity unknown` or `possibly stalled` for open runs |
 | `status`, `possibly_stalled`, `stale`, `activity_error` | kept separate, as in `/clips` |
 | `uid`, `label` | hidden helpers for links and tooltips |
 | `clip_from_ms`, `clip_to_ms` | true extent (open runs: up to `observed_at`) |
 | `zoom_from_ms`, `zoom_to_ms` | the true extent with 5 % (at least 5 s) on either side, for "Zoom to run": never an empty range |
+| `lane_id`, `track`, `root` | hidden helpers: which placement (lane ids are stable, names may not be) |
 
-With `min_lanes` (0–20, default 0) and fewer lanes than that (sub-lanes
-included), empty lanes are added after the real ones: one row each, `lane`
+With `min_lanes` (0–20; default: the preset's `lanes.min_lanes`) and fewer
+rows than that (sub-lanes included), empty rows are added after the real ones: one row each, `lane`
 one or more non-breaking spaces (invisible, unique, never a real lane's
 name), `start` = `stop` = `from` in ms, every other field `null`. A panel of
 fixed height then never draws a single lane as one huge bar.
@@ -237,19 +269,23 @@ Rows of one view (default view if `view` is omitted). Every response has a
 Non-finite numbers are returned as `null`. A view's rows are reused for 5
 seconds (the dashboard reads the default view twice per refresh).
 
-## `GET /runs/{uid}/trend?from&to&max_points&axis`
+## `GET /runs/{uid}/trend?from&to&max_points&axis[&preset][&lane]`
 
 The run's time series view (the first available `timeseries` view, as
 `/runs/{uid}/data?kind=timeseries`) over **the runs like it** in
-`[from, to)` (epoch seconds, as `/clips`): runs on the same lane, with the
-same role and the same start-document `plan_name` (both missing counts as
-the same), whose views include the same view of the same stream. The run
+`[from, to)` (epoch seconds, as `/clips`): the runs of the preset's lane
+`lane` (a lane id from the frame or `/clips`; without it, the run's first
+lane in the preset's track order, said in the notice), with the same role
+and the same start-document `plan_name` (both missing counts as the same),
+whose views include the same view of the same stream. A lane not in the
+preset's range, or a run the preset places nowhere, gives no runs and says
+so. The run
 itself is one of them if it is in the window. One series per field, all
 runs joined; between two runs, one row per field with `value: null`
 halfway between them, so the line breaks there.
 
-`{"view", "kind", "stream", "axis", "fields", "units", "plan_name",
-"rows": [{"time": <ms>, "field", "series", "value"}], "truncated",
+`{"view", "kind", "stream", "axis", "fields", "units", "plan_name", "preset",
+"lane", "lane_name", "rows": [{"time": <ms>, "field", "series", "value"}], "truncated",
 "runs": {"like", "read", "plotted", "without_view", "unreadable",
 "lacking_fields", "max_runs"}, "decimation": {...}, "non_finite", "notice"}`
 
@@ -389,6 +425,11 @@ link, a run from another server): it gets a message, not `404`.
 | `/selection/trend?uid&from&to&max_points&axis` | as `/runs/{uid}/trend` | no rows, `notice` "Select a run …" |
 | `/selection/related?uid` | as `/runs/{uid}/related` | no rows, `role` and `default` `null`, `notice` "Select a run …" |
 | `/selection/curve?uid&view&max_points` | as `/runs/{uid}/curve` | no rows, `notice` "Select a run …" |
+| `/selection/runs?from&to&preset&lane&uid&limit` | the latest runs on `lane`, each once, newest first: `{"preset", "lane", "lane_name", "rows": [{"uid", "root", "label", "start", "stop", "status", "plan_name", "lane_id", "lane"}], "truncated", "notice"}`; with `uid` and no `lane`, the run's first lane | the preset's runs in the window, each once, newest first |
+
+Every `/selection/...` endpoint also takes `root` (see the top of this page).
+`/selection/runs`: `limit` 1–500 (default 50); a `lane` not in the preset's
+range gives no rows and a notice, never another lane.
 
 With a `uid` that is not found: `/selection/run` gives `{"selected": true,
 "found": false, "summary": [{"key": "run", "value": "The selected run is not

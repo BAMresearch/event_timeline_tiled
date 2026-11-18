@@ -39,7 +39,7 @@ from typing import Any
 
 import numpy as np
 from attrs import field, frozen
-from tiled.queries import Comparison, In, KeyPresent, Like
+from tiled.queries import Comparison, Eq, In, KeyPresent, Like
 
 from .tiled_http import HealthStatus, Query, SourceError, TiledReader
 
@@ -62,6 +62,11 @@ def _key_present(key: str) -> Query:
     return query
 
 
+def _eq(key: str, value: Any) -> Query:
+    query: Query = Eq(key, value)
+    return query
+
+
 def _like(key: str, pattern: str) -> Query:
     query: Query = Like(key, pattern)
     return query
@@ -71,6 +76,14 @@ def _in(key: str, values: Sequence[str]) -> Query:
     query: Query = In(key, list(values))
     return query
 
+
+PUSHDOWN_VERSIONS = frozenset({"0.2.21"})
+"""Tiled versions whose ``Eq``/``In`` on start keys are proven to return a
+superset of what the adapter's own ``eq``/``in`` keep, on SQLite and
+PostgreSQL (Codex review 07): a preset's ``scope`` is sent to these only."""
+Scope = Sequence[tuple[str, Sequence[Any]]]
+"""Start-document keys (dotted, ``start.`` included) and the values each may
+take: a preset's ``scope`` as the window searches receive it."""
 
 SCAN_MAX_RUNS = 10_000
 """Runs with ``derived_from`` scanned at most for a UID ``Like`` cannot match."""
@@ -165,9 +178,30 @@ class Layout:
 
     def __init__(self, reader: TiledReader) -> None:
         self.reader = reader
+        self._pushdown: bool | None = None
+
+    def pushdown(self) -> bool:
+        """Whether this server gets a preset's ``scope`` (asked once; an
+        unreadable version means no)."""
+        if self._pushdown is None:
+            self._pushdown = self.reader.server_version() in PUSHDOWN_VERSIONS
+        return self._pushdown
+
+    def _scope_queries(self, scope: Scope) -> list[Query]:
+        if not scope or not self.pushdown():
+            return []
+        return [
+            _eq(key, values[0]) if len(values) == 1 else _in(key, values) for key, values in scope
+        ]
 
     def window_runs(
-        self, root: str, t_from: float, t_to: float, horizon_s: float, max_runs: int
+        self,
+        root: str,
+        t_from: float,
+        t_to: float,
+        horizon_s: float,
+        max_runs: int,
+        scope: Scope = (),
     ) -> tuple[list[RunRecord], bool]:
         """Runs overlapping ``[t_from, t_to)`` under one root (plan §5.4).
 
@@ -186,19 +220,24 @@ class Layout:
         first (an operator needs what is still going on), then closed runs in
         Tiled's order (insertion order: the earliest written), and
         ``truncated`` is true.
+
+        ``scope`` narrows both searches where :meth:`pushdown` allows; the
+        caller still checks every run against it (a superset comes back).
         """
+        narrowed = self._scope_queries(scope)
         opened, truncated_open = self.reader.search(
             root,
             [
                 _no_stop(),
                 _compare("lt", "start.time", t_to),
                 _compare("ge", "start.time", t_to - horizon_s),
+                *narrowed,
             ],
             max_items=max_runs,
         )
         closed, truncated_closed = self.reader.search(
             root,
-            [_compare("lt", "start.time", t_to), _compare("ge", "stop.time", t_from)],
+            [_compare("lt", "start.time", t_to), _compare("ge", "stop.time", t_from), *narrowed],
             max_items=max_runs,
         )
         open_runs = [r for r in (_record(root, item) for item in opened) if r is not None]
@@ -207,6 +246,16 @@ class Layout:
         runs += list(closed_runs.values())
         truncated = truncated_open or truncated_closed or len(runs) > max_runs
         return sorted(runs[:max_runs], key=lambda r: (r.start_time or 0.0, r.key)), truncated
+
+    def find_runs(self, roots: Sequence[str], key: str) -> list[RunRecord]:
+        """The runs stored under ``key`` in each of ``roots`` (a key may be in
+        several roots: the caller decides what that means)."""
+        found = []
+        for root in roots:
+            record = self.find_run([root], key)
+            if record is not None:
+                found.append(record)
+        return found
 
     def find_run(self, roots: Sequence[str], key: str) -> RunRecord | None:
         """The run stored under ``key`` in the first root that has it."""
@@ -338,15 +387,31 @@ class Layout:
         """Latest event time over all streams with scalar data. Reads each
         stream's whole ``time`` column (only that column, unsorted), so use it
         for open runs only (plan §5.2)."""
+        return self.open_run_reading(run)[0]
+
+    def stream_names(self, run: RunRecord) -> tuple[str, ...]:
+        """The run's stream names, sorted: from a closed run's
+        ``stop.num_events`` when it has one (descriptor-created streams,
+        with or without events: Bluesky 1.14.6's RunEngine through
+        ``TiledWriter``), else listed from Tiled."""
+        counts = None if run.stop is None else run.stop.get("num_events")
+        if isinstance(counts, Mapping) and all(isinstance(k, str) for k in counts):
+            return tuple(sorted(counts))
+        return tuple(sorted(s.name for s in self.streams(run)))
+
+    def open_run_reading(self, run: RunRecord) -> tuple[float | None, tuple[str, ...]]:
+        """An open run's latest event time (as :meth:`last_event_time`) and its
+        stream names, from one listing of its streams."""
         latest: float | None = None
-        for stream in self.streams(run):
+        streams = self.streams(run)
+        for stream in streams:
             if not stream.has_table:
                 continue
             column = self._table_columns(run, stream.name, ["time"])
             for t in (_finite(v) for v in column["time"]):
                 if t is not None and (latest is None or t > latest):
                     latest = t
-        return latest
+        return latest, tuple(sorted(s.name for s in streams))
 
     def _table_columns(
         self, run: RunRecord, stream: str, columns: Sequence[str]

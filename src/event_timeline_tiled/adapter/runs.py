@@ -12,12 +12,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from ..clips import lane_key, lane_names
+from ..clips import make_clip
+from ..lanes import arrange
 from ..layout import RunRecord
 from ..run_state import role_of, status_of
 from ..tiled_http import SourceError
 from ..views import TABLE_ROW_LIMIT, ResolvedView, ViewKind, label
-from .common import AXIS, MAX_POINTS, NOT_WRITTEN, UID, VIEW, json_value, ms, upstream
+from .common import AXIS, MAX_POINTS, NOT_WRITTEN, ROOT, UID, VIEW, json_value, ms, upstream
 from .metadata import metadata_rows, plain
 from .results import Results
 from .state import Adapter
@@ -38,9 +39,23 @@ class Runs:
         self._data: OrderedDict[tuple[str, str, str, int, int | None],
                                 tuple[float, dict[str, Any]]] = OrderedDict()  # fmt: skip
 
+    def base_lane(self, run: RunRecord, now: float) -> str | None:
+        """The run's first lane in the default preset, by base name (not a
+        window's disambiguated name); ``None`` if that preset places it nowhere."""
+        adapter = self.adapter
+        clip = make_clip(run, adapter.timeline.activity_of(run, now), False, label(run))
+        if clip is None:
+            return None
+        arranged = arrange(
+            adapter.presets.get(adapter.presets.default), [clip], {(run.root, run.key): run}, now,
+            lambda r: adapter.timeline.streams_of(r, now), adapter.settings.max_lanes,
+            adapter.settings.max_placements,
+        )  # fmt: skip
+        return arranged.lanes[0].base_name if arranged.lanes else None
+
     def summary(self, run: RunRecord) -> dict[str, Any]:
-        act = self.adapter.timeline.activity_of(run, self.adapter.clock())
-        key = lane_key(run)
+        now = self.adapter.clock()
+        act = self.adapter.timeline.activity_of(run, now)
         start, stop = run.start_time, run.stop_time
         reason = (run.stop or {}).get("reason")
         return {
@@ -48,7 +63,7 @@ class Runs:
             "start_uid": run.start_uid,
             "uid_mismatch": run.uid_mismatch,
             "root": run.root or "/",
-            "lane": lane_names([key])[key],
+            "lane": self.base_lane(run, now),
             "role": role_of(run.start).value,
             "status": status_of(run.stop).value,
             "reason": reason if isinstance(reason, str) else None,
@@ -325,8 +340,8 @@ def router(adapter: Adapter, runs: Runs) -> APIRouter:
     api = APIRouter()
 
     @api.get("/runs/{uid}")
-    def run_summary(uid: UID) -> dict[str, Any]:
-        run = adapter.find(uid)
+    def run_summary(uid: UID, root: ROOT = None) -> dict[str, Any]:
+        run = adapter.find(uid, root)
         summary = runs.summary(run)
         metadata, truncated = metadata_rows(run)
         return {
@@ -337,23 +352,24 @@ def router(adapter: Adapter, runs: Runs) -> APIRouter:
         }
 
     @api.get("/runs/{uid}/streams")
-    def run_streams(uid: UID) -> list[dict[str, Any]]:
+    def run_streams(uid: UID, root: ROOT = None) -> list[dict[str, Any]]:
         """Streams with event counts (from the stop document when closed) and the
         first and last event time (from the ``time`` column)."""
-        return runs.streams(adapter.find(uid))
+        return runs.streams(adapter.find(uid, root))
 
     @api.get("/runs/{uid}/streams/{stream}/fields")
-    def stream_fields(uid: UID, stream: UID) -> list[dict[str, Any]]:
-        return runs.fields(adapter.find(uid), stream)
+    def stream_fields(uid: UID, stream: UID, root: ROOT = None) -> list[dict[str, Any]]:
+        return runs.fields(adapter.find(uid, root), stream)
 
     @api.get("/runs/{uid}/views")
-    def run_views(uid: UID) -> dict[str, Any]:
+    def run_views(uid: UID, root: ROOT = None) -> dict[str, Any]:
         """Available views and the default (the first available one)."""
-        return runs.views(adapter.find(uid))
+        return runs.views(adapter.find(uid, root))
 
     @api.get("/runs/{uid}/data")
     def run_data(
         uid: UID,
+        root: ROOT = None,
         view: VIEW = None,
         kind: ViewKind | None = None,
         max_points: MAX_POINTS = 2000,
@@ -364,6 +380,6 @@ def router(adapter: Adapter, runs: Runs) -> APIRouter:
         fields in the first field's units, 2 for the others."""
         if view and kind:
             raise HTTPException(422, "give view or kind, not both")
-        return runs.data(adapter.find(uid), view, kind, max_points, axis)
+        return runs.data(adapter.find(uid, root), view, kind, max_points, axis)
 
     return api

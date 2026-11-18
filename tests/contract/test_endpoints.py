@@ -47,13 +47,17 @@ def test_clip_fields(api: tuple[TestClient, dict[str, Any]]) -> None:
     inside = clips[runs["inside"]["uid"]]
     # MOUSE labels: sampleid, then plan_name (the fixture plan function is called "plan").
     assert (inside["lane"], inside["role"], inside["label"]) == (
-        "MOUSE",
+        "MOUSE · acquisition",
         "acquisition",
         "S-inside · plan",
     )
+    assert inside["lane_key"].startswith("instruments.runs.")
+    assert [(p["preset"], p["track"], p["lane"]) for p in inside["placements"]] == [
+        ("instruments", "runs", "MOUSE · acquisition")
+    ]
     assert clips[runs["proc_inside_ok"]["uid"]]["lane"] == "MOUSE · processing"
-    assert clips[runs["generic_inside"]["uid"]]["lane"] == "generic A"
-    assert clips[runs["no_instrument"]["uid"]]["lane"] == "(unknown)"
+    assert clips[runs["generic_inside"]["uid"]]["lane"] == "generic · A · acquisition"
+    assert clips[runs["no_instrument"]["uid"]]["lane"] == "(unknown) · acquisition"
     mismatch = clips[runs["uid_mismatch"]["uid"]]
     assert (
         mismatch["uid_mismatch"]
@@ -73,7 +77,7 @@ def test_frame_has_final_lanes_in_milliseconds(api: tuple[TestClient, dict[str, 
     assert list(rows[0]) == [
         "lane", "start", "stop", "state", "status", "uid", "label",
         "clip_from_ms", "clip_to_ms", "possibly_stalled", "stale",
-        "zoom_from_ms", "zoom_to_ms", "activity_error",
+        "zoom_from_ms", "zoom_to_ms", "activity_error", "lane_id", "track", "root",
     ]  # fmt: skip
     window_end_ms = manifest["window"][1] * 1000
     by_uid = {r["uid"]: r for r in rows}
@@ -81,9 +85,9 @@ def test_frame_has_final_lanes_in_milliseconds(api: tuple[TestClient, dict[str, 
     assert open_row["stop"] == window_end_ms and open_row["state"] == "open"
     assert by_uid[manifest["runs"]["open_20d"]["uid"]]["state"] == "possibly stalled"
     lanes = [r["lane"] for r in rows]
-    assert lanes.index("MOUSE") < lanes.index("MOUSE · processing")
+    assert lanes.index("MOUSE · acquisition") < lanes.index("MOUSE · processing")
     # Overlapping MOUSE runs are spread over sub-lanes; every run is present.
-    assert any(lane.startswith("MOUSE /") for lane in lanes)
+    assert any(lane.startswith("MOUSE · acquisition /") for lane in lanes)
     assert len(rows) == sum(1 for c in manifest["runs"].values() if c["expect_in_window"])
 
 
@@ -109,7 +113,11 @@ def test_run_summary(api: tuple[TestClient, dict[str, Any]]) -> None:
     client, manifest = api
     body = client.get(f"/runs/{manifest['runs']['aborted']['uid']}").json()
     run = body["run"]
-    assert (run["status"], run["lane"], run["duration_s"]) == ("aborted", "MOUSE", 10.0)
+    assert (run["status"], run["lane"], run["duration_s"]) == (
+        "aborted",
+        "MOUSE · acquisition",
+        10.0,
+    )
     assert run["reason"] == "synthetic abort"
     keys = {(r["document"], r["key"]) for r in body["metadata"]}
     assert {("start", "sampleid"), ("stop", "exit_status"), ("stop", "num_events.baseline")} <= keys
@@ -303,9 +311,8 @@ def test_electrochemistry_run(api: tuple[TestClient, dict[str, Any]]) -> None:
     uid = manifest["runs"]["electrochemistry"]["uid"]
     clips = {c["uid"]: c for c in client.get("/clips", params=_window(manifest)).json()["clips"]}
     clip = clips[uid]
-    assert (clip["lane"], clip["lane_key"], clip["label"]) == (
-        "electrochemistry-k2460 simulator",
-        "-/electrochemistry-k2460/simulator/acquisition",
+    assert (clip["lane"], clip["label"]) == (
+        "electrochemistry-k2460 · simulator · acquisition",
         "example-rest · S-echem",
     )
     views = client.get(f"/runs/{uid}/views").json()
@@ -345,7 +352,11 @@ def test_trend_over_runs_like_the_selected_one(api: tuple[TestClient, dict[str, 
     first = [r["time"] for r in data][:5]
     second = [r["time"] for r in data][5:]
     assert max(first) < gaps[0]["time"] < min(second)
-    assert body["notice"].startswith("Hinted fields of readout over 2 run_sequence runs in range")
+    assert body["notice"].startswith(
+        "Hinted fields of readout over 2 run_sequence runs on "
+        "electrochemistry-k2460 · simulator · acquisition in range"
+    )
+    assert body["lane"] == clip_lane(client, manifest, uid)
     assert body == client.get(f"/runs/{uid}/trend", params={**window, "axis": 1}).json()
     right = client.get("/selection/trend", params={"uid": uid, **window, "axis": 2}).json()
     assert right["fields"] == ["current_a"]
@@ -396,3 +407,8 @@ def test_open_run_before_its_first_batch(api: tuple[TestClient, dict[str, Any]])
     for kind in ("table", "timeseries"):
         data = client.get("/selection/data", params={"uid": uid, "kind": kind}).json()
         assert data["rows"] == [] and data["notice"].endswith("(none in Tiled yet)"), kind
+
+
+def clip_lane(client: TestClient, manifest: dict[str, Any], uid: str) -> str:
+    clips = client.get("/clips", params=_window(manifest)).json()["clips"]
+    return str(next(c["lane_key"] for c in clips if c["uid"] == uid))
