@@ -984,6 +984,7 @@ dependencies = [
     { name = "httpx" },
     { name = "numpy" },
     { name = "pillow" },
+    { name = "pyyaml" },
     { name = "tiled", extra = ["client"] },
     { name = "uvicorn" },
 ]
@@ -1042,6 +1043,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2,<3" },
     { name = "ophyd", marker = "extra == 'testing'", specifier = ">=1.11,<1.12" },
     { name = "pillow", specifier = ">=11,<14" },
+    { name = "pyyaml", specifier = ">=6,<7" },
     { name = "tiled", extras = ["client"], specifier = ">=0.2.21,<0.3" },
     { name = "uvicorn", specifier = ">=0.30,<1" },
 ]

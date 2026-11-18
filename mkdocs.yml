@@ -10,6 +10,7 @@ nav:
       - Demo stack: technical/demo-stack.md
       - Tiled access: technical/tiled-access.md
       - Queue status: technical/queues.md
+      - Presets: technical/presets.md
       - Development: technical/development.md
       - Testing: technical/testing.md
       - Contract migrations: technical/migrations.md

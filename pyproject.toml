@@ -21,6 +21,7 @@ dependencies = [
     "numpy>=2,<3",
     "pillow>=11,<14",
     "bluesky-queueserver-api>=0.0.14,<0.1",
+    "pyyaml>=6,<7",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -90,7 +91,7 @@ version = {attr = "event_timeline_tiled.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-event_timeline_tiled = ["py.typed"]
+event_timeline_tiled = ["py.typed", "presets/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,16 @@
+# The default preset (presets.md §4.1): one lane per catalogue root, facility,
+# instrument, station and role. Sorting by that tuple puts each instrument's
+# processing lane right after its acquisition lane. Shipped with the package;
+# its id is reserved: copy it under another id to change it.
+version: 1
+id: instruments
+title: Instruments
+tracks:
+  - id: runs
+    name: Runs
+    lane_prefix: false
+    group_by:
+      fields: [root, start.facility, start.instrument, start.station, role]
+      name: ['{start.instrument|(unknown)}', '{start.station}', '{role}']
+      # A list or mapping as facility, instrument or station counts as missing.
+      invalid: missing
