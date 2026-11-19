@@ -8,6 +8,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Mapping
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -18,7 +19,20 @@ from ..layout import RunRecord
 from ..run_state import role_of, status_of
 from ..tiled_http import SourceError
 from ..views import TABLE_ROW_LIMIT, ResolvedView, ViewKind, label
-from .common import AXIS, MAX_POINTS, NOT_WRITTEN, ROOT, UID, VIEW, json_value, ms, upstream
+from .common import (
+    AXIS,
+    MAX_POINTS,
+    NOT_WRITTEN,
+    ROOT,
+    TZ,
+    UID,
+    VIEW,
+    X_AXIS,
+    json_value,
+    ms,
+    upstream,
+    zone,
+)
 from .metadata import metadata_rows, plain
 from .results import Results
 from .state import Adapter
@@ -36,7 +50,7 @@ class Runs:
         self.results = results
         self.data_cache_s = data_cache_s
         self._lock = threading.Lock()
-        self._data: OrderedDict[tuple[str, str, str, int, int | None],
+        self._data: OrderedDict[tuple[str, str, str, int, int | None, str],
                                 tuple[float, dict[str, Any]]] = OrderedDict()  # fmt: skip
 
     def base_lane(self, run: RunRecord, now: float) -> str | None:
@@ -152,6 +166,7 @@ class Runs:
         kind: ViewKind | None,
         max_points: int,
         axis: int | None = None,
+        x: str = "time",
     ) -> dict[str, Any]:
         views = self.adapter.views_of(run)
         if kind is not None:
@@ -168,14 +183,14 @@ class Runs:
             return {"view": chosen.name, "kind": chosen.kind.value, "rows": [],
                     "truncated": False, "reason": chosen.reason,
                     "notice": f"{chosen.title}: {chosen.reason}"}  # fmt: skip
-        key = (run.root, run.key, chosen.name, max_points, axis)
+        key = (run.root, run.key, chosen.name, max_points, axis, x)
         now = time.monotonic()
         with self._lock:
             cached = self._data.get(key)
         if cached is not None and now - cached[0] < self.data_cache_s:
             return cached[1]
         try:
-            body = self._read(run, chosen, max_points, axis)
+            body = self._read(run, chosen, max_points, axis, x)
         except SourceError as exc:
             raise upstream(exc) from None
         with self._lock:
@@ -186,7 +201,7 @@ class Runs:
         return body
 
     def _read(
-        self, run: RunRecord, view: ResolvedView, max_points: int, axis: int | None
+        self, run: RunRecord, view: ResolvedView, max_points: int, axis: int | None, x: str
     ) -> dict[str, Any]:
         if view.kind is ViewKind.SUMMARY:
             rows, truncated = metadata_rows(run)
@@ -202,7 +217,7 @@ class Runs:
         if view.kind is ViewKind.IMAGE:
             return {"view": view.name, "kind": view.kind.value, "rows": [], "truncated": False,
                     "notice": f"{view.title}: shown in Corrected data"}  # fmt: skip
-        return self._timeseries(run, view, max_points, axis)
+        return self._timeseries(run, view, max_points, axis, x)
 
     def _table(self, run: RunRecord, view: ResolvedView) -> dict[str, Any]:
         """Long rows, stream by stream in view order, each stream with its own
@@ -250,13 +265,22 @@ class Runs:
                 "notice": notice}  # fmt: skip
 
     def _timeseries(
-        self, run: RunRecord, view: ResolvedView, max_points: int, axis: int | None = None
+        self,
+        run: RunRecord,
+        view: ResolvedView,
+        max_points: int,
+        axis: int | None = None,
+        x: str = "time",
     ) -> dict[str, Any]:
         """Long rows (time, field, series, value) from one stream: at most
         ``max_points`` rows over the fields returned. Events are decimated to
         ``max_points // fields``: every k-th from the first, and always the last.
         With ``axis``, only the fields of that axis: 1 for the fields in the
-        first field's units, 2 for all others."""
+        first field's units, 2 for all others.
+
+        With ``x="elapsed"``, wide rows instead, one per event: ``elapsed_s``
+        (seconds since the run's start document, else its first event) and one
+        column per field, named as its series; the same decimation."""
         [stream] = view.streams
         wanted = axis_fields(view, axis)
         fields = wanted[:max_points]
@@ -271,6 +295,9 @@ class Runs:
         else:
             every = math.ceil((n - 1) / (budget - 1))
             indices = [*range(0, n - 1, every), n - 1]
+        if x == "elapsed":
+            return self._elapsed(run, view, stream, columns, indices, fields, wanted, axis,
+                                 every, n, max_points)  # fmt: skip
         non_finite = 0
         rows = []
         series = series_names(view, fields)
@@ -316,6 +343,70 @@ class Runs:
             "notice": notice,
         }
 
+    def _elapsed(
+        self,
+        run: RunRecord,
+        view: ResolvedView,
+        stream: str,
+        columns: Mapping[str, list[Any]],
+        indices: list[int],
+        fields: list[str],
+        wanted: list[str],
+        axis: int | None,
+        every: int,
+        n: int,
+        max_points: int,
+    ) -> dict[str, Any]:
+        """:meth:`_timeseries` with ``x="elapsed"``: wide rows."""
+        series = series_names(view, fields)
+        times = [columns["time"][i] for i in indices]
+        finite = [t for t in times if isinstance(t, int | float) and math.isfinite(t)]
+        start = run.start.get("time")
+        t0 = start if isinstance(start, int | float) and math.isfinite(start) else None
+        if t0 is None and finite:
+            t0 = min(finite)
+        non_finite = len(times) - len(finite)
+        rows: list[dict[str, Any]] = []
+        for i, t in zip(indices, times, strict=True):
+            if t0 is None or not isinstance(t, int | float) or not math.isfinite(t):
+                continue
+            row: dict[str, Any] = {"elapsed_s": round(t - t0, 3)}
+            for f in fields:
+                value = json_value(columns[f][i])
+                non_finite += value is None
+                row[series[f]] = value
+            rows.append(row)
+        rows.sort(key=lambda r: r["elapsed_s"])
+        fields_cut = len(fields) < len(wanted)
+        notice = f"{view.title} of {stream}: {len(indices)} of {n} events"
+        if fields_cut:
+            notice += f", first {len(fields)} of {len(wanted)} fields"
+        if n == 0 and run.stop is None:
+            notice += NOT_WRITTEN
+        return {
+            "view": view.name,
+            "kind": view.kind.value,
+            "stream": stream,
+            "axis": axis,
+            "x": "elapsed",
+            "fields": fields,
+            "series": [series[f] for f in fields],
+            "units": dict(view.units),
+            "start": t0,
+            "rows": rows,
+            "truncated": fields_cut,
+            "decimation": {
+                "method": "every k-th event, last event always kept",
+                "every": every,
+                "source_rows": n,
+                "events": len(indices),
+                "returned": len(rows),
+                "max_points": max_points,
+            },
+            "non_finite": non_finite,
+            "notice": notice,
+        }
+
 
 def axis_fields(view: ResolvedView, axis: int | None) -> list[str]:
     """A time series view's fields, or those of one axis: 1 for the fields in
@@ -332,21 +423,79 @@ def series_names(view: ResolvedView, fields: list[str]) -> dict[str, str]:
     return {f: f"{f} [{view.units[f]}]" if f in view.units else f for f in fields}
 
 
-def summary_rows(summary: Mapping[str, Any]) -> list[dict[str, Any]]:
-    return [{"key": k, "value": json_value(v)} for k, v in summary.items()]
+SUMMARY_FIRST = (
+    "status",
+    "reason",
+    "label",
+    "plan_name",
+    "start",
+    "stop",
+    "duration_s",
+    "last_event",
+    "last_event_age_s",
+    "possibly_stalled",
+    "activity_error",
+)
+"""Summary rows shown first: the run's state, then its identity (``uid``, …)."""
+
+
+SUMMARY_TIMES = frozenset({"start", "stop", "last_event"})
+"""Summary keys holding epoch seconds; keys ending in ``_s`` hold durations."""
+
+
+def summary_rows(summary: Mapping[str, Any], tz: tzinfo = UTC) -> list[dict[str, Any]]:
+    """Key/value rows of :meth:`Runs.summary`: its state first, so a short
+    panel shows it, then the other keys in their order. ``text`` is the value
+    for reading: times in ``tz``, durations in units, yes/no."""
+    keys = [k for k in SUMMARY_FIRST if k in summary]
+    keys += [k for k in summary if k not in keys]
+    rows = []
+    for k in keys:
+        value = json_value(summary[k])
+        rows.append({"key": k, "value": value, "text": readable(k, value, tz)})
+    return rows
+
+
+def readable(key: str, value: Any, tz: tzinfo) -> str:
+    """A summary value as text: see :func:`summary_rows`."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int | float) and key in SUMMARY_TIMES:
+        return datetime.fromtimestamp(value, tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+    if isinstance(value, int | float) and key.endswith("_s"):
+        return duration_text(value)
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def duration_text(seconds: float) -> str:
+    """``8.5 s``, ``12 min 3 s``, ``5 h 2 min``, ``3 d 4 h``."""
+    sign, rest = ("-" if seconds < 0 else ""), abs(seconds)
+    if rest < 60:
+        return f"{sign}{rest:.3g} s"
+    m, s = divmod(round(rest), 60)
+    if m < 60:
+        return f"{sign}{m} min {s} s"
+    h, m = divmod(m, 60)
+    if h < 48:
+        return f"{sign}{h} h {m} min"
+    d, h = divmod(h, 24)
+    return f"{sign}{d} d {h} h"
 
 
 def router(adapter: Adapter, runs: Runs) -> APIRouter:
     api = APIRouter()
 
     @api.get("/runs/{uid}")
-    def run_summary(uid: UID, root: ROOT = None) -> dict[str, Any]:
+    def run_summary(uid: UID, root: ROOT = None, tz: TZ = "") -> dict[str, Any]:
+        """``tz``: the time zone of the summary rows' ``text``; default UTC."""
         run = adapter.find(uid, root)
         summary = runs.summary(run)
         metadata, truncated = metadata_rows(run)
         return {
             "run": summary,
-            "summary": summary_rows(summary),
+            "summary": summary_rows(summary, zone(tz)),
             "metadata": metadata,
             "metadata_truncated": truncated,
         }
@@ -374,12 +523,14 @@ def router(adapter: Adapter, runs: Runs) -> APIRouter:
         kind: ViewKind | None = None,
         max_points: MAX_POINTS = 2000,
         axis: AXIS = None,
+        x: X_AXIS = "time",
     ) -> dict[str, Any]:
         """Rows for one view: ``view`` by name, else the first available view of
         ``kind``, else the default view. ``axis`` (time series only): 1 for the
-        fields in the first field's units, 2 for the others."""
+        fields in the first field's units, 2 for the others. ``x`` (time series
+        only): ``elapsed`` for wide rows against seconds since the run's start."""
         if view and kind:
             raise HTTPException(422, "give view or kind, not both")
-        return runs.data(adapter.find(uid, root), view, kind, max_points, axis)
+        return runs.data(adapter.find(uid, root), view, kind, max_points, axis, x)
 
     return api

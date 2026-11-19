@@ -18,13 +18,15 @@ From top to bottom:
 
 - **A narrow top row:** *Queue* and *Data status*, as on the Timeline (below).
 - **Timeline**, in the preset's lanes, with *Select run*, *Zoom to run*,
-  *Unfold lane into streams* and *Fold* on every block.
+  *Unfold lane into streams* and *Fold* on every block. The colours are in
+  its ⓘ and [below](#colours).
 - **Trend** of the selected run and the runs like it on the lane you
   clicked (the line above names the lane).
 - **The selected run**, in three columns: the latest runs on its lane
   (before a selection: the preset's runs in the range; click one to select
-  it), its streams, and its state (status, duration, reason, activity) above
-  its start and stop documents.
+  it) and its streams, both with times as how long ago, and its state
+  (status, reason, duration, activity, then its uid and lane) above its start
+  and stop documents.
 - **Its curves:** the time series of its events beside its corrected curve
   (for a measurement, its latest usable processing result's). Each says in
   the line above it when there is nothing to draw.
@@ -37,7 +39,8 @@ table and stream fields are on the Timeline.
 From top to bottom, in sections you can collapse by clicking their title
 (the next reload opens them all again):
 
-- **Top, always shown:** *Queue*, per instrument: the RE Manager's state
+- **Top, always shown:** *Queue*, per instrument the preset shows (a
+  preset of instruments without a queue shows none): the RE Manager's state
   (`idle`, `executing_queue`, `paused`, or `unreachable` when it does not
   answer), the running plan, since when it runs, the number of queued
   items, and the progress of the current run of the queue in plans ("1 of
@@ -49,7 +52,10 @@ From top to bottom, in sections you can collapse by clicking their title
   selected run its details and streams. On the right, the selected run's
   data in its default view (for MOUSE measurements: the readings of
   `mouse_eiger_measure`, `snapshot` and `baseline`; for electrochemistry
-  runs: voltage and current), and a time series when the run has one.
+  runs: voltage and current), and a time series when the run has one,
+  drawn against the time since the run started, so a short run fills the
+  panel whatever the time range. Times in *Selected run* are in your
+  browser's time zone (or the dashboard's, if set).
   Fields in other units than the first are drawn against a second axis on
   the right; the legend gives each field's units. The line above the data
   says which view it is and whether rows were left out (a table shows at

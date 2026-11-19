@@ -183,6 +183,8 @@ def panel_queries(
             for name, value in (("run", run), ("stream", stream), ("root", ""), ("lane", ""),
                                 ("unfold", ""), ("preset", "instruments")):  # fmt: skip
                 url = url.replace(f"${{{name}:percentencode}}", value)
+            # The browser's zone, which Grafana's frontend fills in.
+            url = url.replace("${__timezone}", "Europe/Berlin")
             query = dict(target, url=url)
             window = {"from": str(int((now - 86400) * 1000)), "to": str(int(now * 1000))}
             status, body = http("/api/ds/query", {"queries": [query], **window})

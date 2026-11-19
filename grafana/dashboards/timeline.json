@@ -176,7 +176,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/queues",
+     "url": "http://adapter:8000/queues?preset=${preset:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -221,14 +221,17 @@
      ]
     }
    ],
-   "description": "Each RE Manager's state and running plan. Progress counts the plans finished since the queue started (or since the dashboard's adapter first saw it running), against those plus the plans still queued: plans, not time; the history before the run does not count.",
+   "description": "Each RE Manager's state and running plan, for the instruments the preset shows. Progress counts the plans finished since the queue started (or since the dashboard's adapter first saw it running), against those plus the plans still queued: plans, not time; the history before the run does not count.",
    "options": {
     "showHeader": true,
     "cellHeight": "sm"
    },
    "fieldConfig": {
     "defaults": {
-     "noValue": "no RE Manager configured"
+     "noValue": "no RE Manager for these instruments",
+     "custom": {
+      "minWidth": 60
+     }
     },
     "overrides": [
      {
@@ -263,7 +266,7 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 150
+        "value": 100
        }
       ]
      },
@@ -275,7 +278,7 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 115
+        "value": 105
        }
       ]
      },
@@ -299,7 +302,23 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 70
+        "value": 60
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "running_since"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "dateTimeFromNow"
+       },
+       {
+        "id": "displayName",
+        "value": "since"
        }
       ]
      },
@@ -1183,7 +1202,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}&root=${root:percentencode}",
+     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}&root=${root:percentencode}&tz=${__timezone}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1196,14 +1215,14 @@
        "type": "string"
       },
       {
-       "selector": "value",
-       "text": "value",
+       "selector": "text",
+       "text": "text",
        "type": "string"
       }
      ]
     }
    ],
-   "description": "The selected run's state: status, duration, reason, activity.",
+   "description": "The selected run's state (status, reason, duration, activity), then where it is: uid, root, lane, role.",
    "options": {
     "showHeader": false,
     "cellHeight": "sm"
@@ -1340,7 +1359,7 @@
    }
   },
   {
-   "type": "timeseries",
+   "type": "xychart",
    "title": "Run time series",
    "gridPos": {
     "x": 12,
@@ -1362,35 +1381,14 @@
      "type": "json",
      "source": "url",
      "parser": "backend",
-     "format": "timeseries",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&axis=1",
+     "format": "table",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&x=elapsed&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
      },
      "root_selector": "rows",
-     "columns": [
-      {
-       "selector": "time",
-       "text": "time",
-       "type": "timestamp_epoch"
-      },
-      {
-       "selector": "field",
-       "text": "field",
-       "type": "string"
-      },
-      {
-       "selector": "series",
-       "text": "series",
-       "type": "string"
-      },
-      {
-       "selector": "value",
-       "text": "value",
-       "type": "number"
-      }
-     ]
+     "columns": []
     },
     {
      "refId": "B",
@@ -1401,38 +1399,29 @@
      "type": "json",
      "source": "url",
      "parser": "backend",
-     "format": "timeseries",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&axis=2",
+     "format": "table",
+     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&x=elapsed&axis=2",
      "url_options": {
       "method": "GET",
       "data": ""
      },
      "root_selector": "rows",
-     "columns": [
-      {
-       "selector": "time",
-       "text": "time",
-       "type": "timestamp_epoch"
-      },
-      {
-       "selector": "field",
-       "text": "field",
-       "type": "string"
-      },
-      {
-       "selector": "series",
-       "text": "series",
-       "type": "string"
-      },
-      {
-       "selector": "value",
-       "text": "value",
-       "type": "number"
-      }
-     ]
+     "columns": []
     }
    ],
+   "description": "The selected run's time series view against the time since its start: the whole run, whatever the dashboard's time range.",
    "options": {
+    "mapping": "auto",
+    "series": [
+     {
+      "x": {
+       "matcher": {
+        "id": "byName",
+        "options": "elapsed_s"
+       }
+      }
+     }
+    ],
     "legend": {
      "showLegend": true,
      "displayMode": "list",
@@ -1444,14 +1433,26 @@
    },
    "fieldConfig": {
     "defaults": {
-     "displayName": "${__field.labels.series}",
      "noValue": "nothing to plot (see the line above)",
+     "displayName": "${__field.name}",
      "custom": {
-      "drawStyle": "line",
-      "showPoints": "auto"
+      "show": "lines",
+      "lineWidth": 1
      }
     },
     "overrides": [
+     {
+      "matcher": {
+       "id": "byFrameRefID",
+       "options": "A"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       }
+      ]
+     },
      {
       "matcher": {
        "id": "byFrameRefID",
@@ -1459,8 +1460,32 @@
       },
       "properties": [
        {
+        "id": "unit",
+        "value": "short"
+       },
+       {
         "id": "custom.axisPlacement",
         "value": "right"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "elapsed_s"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "s"
+       },
+       {
+        "id": "displayName",
+        "value": "since start"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "auto"
        }
       ]
      }
@@ -1613,6 +1638,7 @@
      ]
     }
    ],
+   "description": "One lane per row of the preset; a run may appear on several. Green success \u00b7 red failed \u00b7 orange aborted \u00b7 blue open \u00b7 yellow possibly stalled \u00b7 light blue activity unknown \u00b7 grey stale. Click a run to select it, zoom to it, or unfold its lane into one row per stream.",
    "transformations": [
     {
      "id": "partitionByValues",

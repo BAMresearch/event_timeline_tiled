@@ -155,10 +155,14 @@ def router(adapter: Adapter) -> APIRouter:
         return rows
 
     @api.get("/queues")
-    def queue_status() -> list[dict[str, Any]]:
+    def queue_status(preset: PRESET = None) -> list[dict[str, Any]]:
         """One row per configured RE Manager (plan §5.5), read now. Unreachable
-        managers have ``reachable: false`` and no state, never "idle"."""
-        return adapter.queues.rows()
+        managers have ``reachable: false`` and no state, never "idle". With
+        ``preset``, only the managers whose instrument its scope admits."""
+        if preset is None:
+            return adapter.queues.rows()
+        chosen = adapter.preset(preset)
+        return adapter.queues.rows(chosen.admits_instrument)
 
     @api.get("/presets")
     def presets() -> list[dict[str, Any]]:

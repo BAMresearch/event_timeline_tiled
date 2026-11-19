@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -281,6 +282,20 @@ def test_selection_endpoints(api: tuple[TestClient, dict[str, Any]]) -> None:
     for key in ("summary", "metadata", "metadata_truncated"):
         assert selected[key] == whole[key]
     assert {"document": "stop", "key": "exit_status", "value": "success"} in selected["metadata"]
+    # The state first, so a short panel shows it; every key of the run once.
+    keys = [row["key"] for row in selected["summary"]]
+    assert keys[:2] == ["status", "reason"] and sorted(keys) == sorted(selected["run"])
+    assert keys.index("activity_error") < keys.index("uid")
+    # Readable text: times in the viewer's zone (UTC by default), durations in units.
+    text = {row["key"]: row["text"] for row in selected["summary"]}
+    assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC", text["start"])
+    assert text["status"] == "success" and re.fullmatch(r"\d+ min \d+ s|[\d.]+ s",
+                                                        text["duration_s"])  # fmt: skip
+    berlin = client.get("/selection/run", params={"uid": uid, "tz": "Europe/Berlin"}).json()
+    start = next(r["text"] for r in berlin["summary"] if r["key"] == "start")
+    assert start.endswith((" CET", " CEST"))
+    assert client.get(f"/runs/{uid}", params={"tz": "utc"}).status_code == 200
+    assert client.get(f"/runs/{uid}", params={"tz": "Nowhere/Atlantis"}).status_code == 422
     assert (
         client.get("/selection/streams", params={"uid": uid}).json()
         == client.get(f"/runs/{uid}/streams").json()
@@ -333,6 +348,17 @@ def test_electrochemistry_run(api: tuple[TestClient, dict[str, Any]]) -> None:
         assert (part["axis"], part["fields"]) == (axis, [field])
         assert {(r["field"], r["series"]) for r in part["rows"]} == {(field, series)}
         assert len(part["rows"]) == 5
+        # Against the time since the start: wide rows, one column per series.
+        params = {"uid": uid, "kind": "timeseries", "axis": axis, "x": "elapsed"}
+        wide = client.get("/selection/data", params=params).json()
+        assert (wide["x"], wide["series"], len(wide["rows"])) == ("elapsed", [series], 5)
+        assert all(set(r) == {"elapsed_s", series} for r in wide["rows"])
+        elapsed = [r["elapsed_s"] for r in wide["rows"]]
+        assert elapsed == sorted(elapsed) and 0 <= elapsed[0] and elapsed[-1] <= 50
+    whole = client.get(f"/runs/{uid}/data", params={"kind": "timeseries", "x": "elapsed"})
+    assert set(whole.json()["rows"][0]) == {"elapsed_s", "voltage_v [V]", "current_a [A]"}
+    bad = client.get("/selection/data", params={"uid": uid, "kind": "timeseries", "x": "seq"})
+    assert bad.status_code == 422
 
 
 def test_trend_over_runs_like_the_selected_one(api: tuple[TestClient, dict[str, Any]]) -> None:

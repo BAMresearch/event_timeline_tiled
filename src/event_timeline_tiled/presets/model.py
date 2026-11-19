@@ -113,6 +113,13 @@ class Preset:
         """``scope``: a conjunction of ``eq``/``in`` on start keys (presets.md §7)."""
         return all(evaluate(leaf, context, 0.0) for leaf in self.scope)
 
+    def admits_instrument(self, instrument: str) -> bool:
+        """Whether the scope's predicates on ``start.instrument`` (if any) admit
+        runs of ``instrument``: which RE Managers' queues the preset shows."""
+        leaves = [leaf for leaf in self.scope if leaf.path == ("start", "instrument")]
+        context = Context("", "", {"instrument": instrument}, None, "", "", None)
+        return all(evaluate(leaf, context, 0.0) for leaf in leaves)
+
 
 class _Reader:
     """Reads one file's data, raising errors that point into the file."""

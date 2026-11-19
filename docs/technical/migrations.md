@@ -138,3 +138,16 @@ Presets, step 8 part 4 (2026-11-18):
   the top to the selected run further down; *Timeline* (`ett-timeline`)
   stays. Each links to the other in its top bar, keeping the time range and
   the variables. Additive.
+
+Layout and electrochemistry (2026-11-18), all additive:
+
+- `/runs/{uid}` and `/selection/run` take `tz` and give each `summary` row a
+  `text` (readable times and durations); the summary rows list the run's
+  state first. *Selected run* shows `text`, in the viewer's time zone.
+- `/runs/{uid}/data` and `/selection/data` take `x=elapsed`: wide rows
+  against the time since the run's start. *Run time series* is now an XY
+  chart against that time, so a short run fills it whatever the range.
+- `/queues` takes `preset`: the dashboards' *Queue* shows only the RE
+  Managers of the instruments the preset shows.
+- `deploy/presets/electrochemistry.yaml`: one lane per electrochemistry
+  station.

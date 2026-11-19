@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
@@ -129,16 +130,28 @@ def test_timeline_shows_whether_its_data_is_complete() -> None:
 def test_time_series_puts_other_units_on_a_second_axis() -> None:
     """Axis 1: fields in the first field's units; axis 2, on the right: the rest.
     Generic: no field names or units in the dashboard."""
-    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
-    panels = [p for p in _panels(timeline) if p["type"] == "timeseries"]
-    assert {p["title"].split(":")[0] for p in panels} == {"Run time series", "Trend"}
-    for panel in panels:
-        axes = {t["refId"]: t["url"].rsplit("axis=", 1)[1] for t in panel["targets"]}
-        assert axes == {"A": "1", "B": "2"}
-        [right] = panel["fieldConfig"]["overrides"]
-        assert right["matcher"] == {"id": "byFrameRefID", "options": "B"}
-        assert right["properties"] == [{"id": "custom.axisPlacement", "value": "right"}]
-        assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.labels.series}"
+    for name in ("timeline.json", "overview.json"):
+        dashboard = json.loads((GRAFANA / "dashboards" / name).read_text())
+        panels = [p for p in _panels(dashboard) if p["type"] in ("timeseries", "xychart")
+                  and any("axis=" in t.get("url", "") for t in p["targets"])]  # fmt: skip
+        assert {p["title"].split(":")[0] for p in panels} == {"Run time series", "Trend"}
+        for panel in panels:
+            axes = {
+                t["refId"]: parse_qs(urlsplit(t["url"]).query)["axis"] for t in panel["targets"]
+            }
+            assert axes == {"A": ["1"], "B": ["2"]}
+            right = [o for o in panel["fieldConfig"]["overrides"]
+                     if o["matcher"] == {"id": "byFrameRefID", "options": "B"}]  # fmt: skip
+            assert len(right) == 1
+            assert {"id": "custom.axisPlacement", "value": "right"} in right[0]["properties"]
+            if panel["type"] == "timeseries":
+                assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.labels.series}"
+                continue
+            # The run's time series: against the time since its start, wide rows.
+            assert all("x=elapsed" in t["url"] and not t["columns"] for t in panel["targets"])
+            assert panel["options"]["series"] == [
+                {"x": {"matcher": {"id": "byName", "options": "elapsed_s"}}}
+            ]
 
 
 # Columns the adapter may return as null (docs/technical/endpoints.md), per table.
