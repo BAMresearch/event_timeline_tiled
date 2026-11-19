@@ -2,13 +2,15 @@
 
 <!-- version list -->
 
-## Unreleased
+First release: a read-only Grafana timeline of Bluesky runs in Tiled.
 
-- Project scaffold: package, settings, read-only Tiled access, adapter with
-  `/health`.
-- Synthetic fixtures (`testing` extra): MOUSE-like measurements written by a
-  real RunEngine, processing runs with HDF5 arrays, the window edge cases of
-  the plan; `ett-demo-bootstrap` and `ett-demo-seed`.
-- Demo stack: nginx proxy, Grafana 13.3.1 with pinned Infinity and Business
-  Variable plugins, adapter, and a disposable multi-user Tiled 0.2.21 on
-  PostgreSQL with a read-only adapter key.
+- Adapter: reads runs from Tiled with a read-only key (paged searches, never
+  one run at a time) and serves flat tables to Grafana through Infinity;
+  recorded status, inferred activity and source health kept apart; read-only
+  queue status from RE Managers (ZeroMQ) and Bluesky HTTP Servers.
+- Dashboards: the timeline with lanes and presets, the Overview (selected
+  run, its streams and time series, trends of sequential runs, queues), and
+  health; presets for MOUSE-like instruments and electrochemistry stations.
+- Deployment: the demo stack (Docker or rootless Podman) with a disposable
+  multi-user Tiled 0.2.21 on PostgreSQL, and the single-host layout for an
+  instrument PC, on loopback only (`deploy/compose.host.yaml`).
