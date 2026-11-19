@@ -6,6 +6,7 @@ No real sample names, proposals, user names, hosts or paths appear here.
 from __future__ import annotations
 
 import copy
+import itertools
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Literal
@@ -159,16 +160,27 @@ class FixtureWriter:
         return self._write_captured(plan(), start, stop, "success")
 
     def electrochemistry_run(
-        self, md: dict[str, Any], start: float, stop: float | None, *, n_events: int = 5
+        self,
+        md: dict[str, Any],
+        start: float,
+        stop: float | None,
+        *,
+        n_events: int = 5,
+        level: float = 3.7,
+        drop: float = 0.0,
     ) -> str:
         """An electrochemistry-bluesky-like run: ``readout`` with hinted
         ``voltage_v`` and ``current_a`` (one device, in that order, as
         electrochemistry-bluesky writes them to Tiled) and an unhinted ``t_s``,
-        and a ``sequence_events`` stream (step markers)."""
+        and a ``sequence_events`` stream (step markers). The voltage starts at
+        ``level`` and falls by ``drop`` over the run, plus noise."""
         rng = np.random.default_rng(2)
-        voltage = _UnitSignal(
-            func=lambda: 3.7 + 0.01 * rng.random(), name="voltage_v", units="V", kind="hinted"
-        )
+        reading = itertools.count()
+
+        def volts() -> float:
+            return level - drop * next(reading) / max(n_events - 1, 1) + 0.01 * rng.random()
+
+        voltage = _UnitSignal(func=volts, name="voltage_v", units="V", kind="hinted")
         current = _UnitSignal(func=lambda: 1e-3, name="current_a", units="A", kind="hinted")
         elapsed = _UnitSignal(func=lambda: 0.0, name="t_s", units="s", kind="normal")
         step = _UnitSignal(func=lambda: 0.0, name="event_t_s", units="s", kind="normal")

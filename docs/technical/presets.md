@@ -23,6 +23,8 @@ loaded at start; one bad file stops the adapter with its file name, line,
 column and the path of the problem (`tracks[1].where.op`).
 The package ships one preset, `instruments` (one lane per instrument and
 role): its id is reserved, so copy it under another id to change it.
+`deploy/presets/electrochemistry.yaml` is a deployment's preset: one lane
+per electrochemistry station, with all its runs.
 
 ## Example
 

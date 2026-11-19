@@ -1,0 +1,21 @@
+# Electrochemistry (electrochemistry-bluesky with a Keithley 2460).
+#
+# One sample at a time, so one lane per station with all its activity: run
+# sheets, calibrations and anything else, labelled by the instrument's own
+# keys (measurement_id, sample_id). On the Overview dashboard, selecting a run
+# shows its readout beside its details, and the trend above follows the runs
+# with the same plan on that station: the run sheets in sequence.
+version: 1
+id: electrochemistry
+title: Electrochemistry by station
+scope:
+  - {field: start.instrument, op: eq, value: electrochemistry-k2460}
+tracks:
+  - id: stations
+    name: Stations
+    lane_prefix: false
+    group_by:
+      field: start.station
+      fallback: (no station)
+lanes:
+  min_lanes: 2
