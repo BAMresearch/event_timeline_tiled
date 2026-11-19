@@ -93,6 +93,32 @@ where = ["src"]
 [tool.setuptools.package-data]
 event_timeline_tiled = ["py.typed", "presets/*.yaml"]
 
+[tool.semantic_release]
+# Conventional commits. CI opens a release PR on main; merging it tags the
+# release (.github/workflows/ci.yml, CONTRIBUTING.md).
+version_variables = ["src/event_timeline_tiled/__init__.py:__version__"]
+tag_format = "v{version}"
+commit_parser = "conventional"
+allow_zero_version = true
+major_on_zero = false
+
+[tool.semantic_release.branches.main]
+match = "main"
+
+[tool.semantic_release.changelog]
+mode = "update"
+insertion_flag = "<!-- version list -->"
+exclude_commit_patterns = ['^chore\(release\):']
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+
+[tool.semantic_release.remote]
+type = "github"
+
+[tool.semantic_release.publish]
+upload_to_vcs_release = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"

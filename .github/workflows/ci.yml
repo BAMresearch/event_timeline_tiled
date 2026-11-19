@@ -237,3 +237,102 @@ jobs:
         run: |
           docker-compose -f deploy/compose.yaml -f deploy/compose.host.yaml \
             -f deploy/ci/compose.host-demo.yaml --profile demo down -v || true
+
+  # Releases (CONTRIBUTING.md), on main once every check passes. A push that
+  # sets a new __version__ (a merged release PR) is tagged and gets a GitHub
+  # release; any other push opens or updates the release PR if there is
+  # anything to release. Nothing goes to PyPI: deployments install from a tag.
+  tag:
+    needs: [lint, test, package, stack, stack-podman, stack-single-host]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}  # a re-run tags the commit that set the version
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          version() { python3 -c 'import re, sys; print(re.search(r"__version__ = \"([^\"]+)\"", sys.stdin.read()).group(1))'; }
+          VERSION=$(version < src/event_timeline_tiled/__init__.py)
+          PREVIOUS=$(git show HEAD^1:src/event_timeline_tiled/__init__.py | version)
+          TAG="v$VERSION"
+          if [ "$VERSION" = "0.0.0" ] || git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Nothing to tag ($TAG)."
+            exit 0
+          fi
+          if [ "$PREVIOUS" = "$VERSION" ]; then
+            echo "::error::$TAG is not tagged, but this commit did not set it: re-run the release of the commit that did."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+          python3 - "$VERSION" > "$RUNNER_TEMP/notes.md" <<'PY'
+          import re, sys
+          text = open("CHANGELOG.md").read()
+          section = re.search(rf"^## v{re.escape(sys.argv[1])}\b.*?$(.*?)(?=^## v|\Z)", text, re.M | re.S)
+          print(section.group(1).strip() if section else "See CHANGELOG.md.")
+          PY
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  release-pr:
+    needs: [tag]
+    if: needs.tag.outputs.tag == ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write  # to start CI on the release branch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+      - uses: astral-sh/setup-uv@v6
+      - id: next
+        run: |
+          set -eu
+          psr() { uvx --from python-semantic-release==10.7.0 semantic-release "$@"; }
+          NEXT=$(psr --noop version --print)
+          LAST=$(psr version --print-last-released 2>/dev/null || true)
+          echo "next=$NEXT, last released=${LAST:-none}"
+          if [ -z "$NEXT" ] || [ "$NEXT" = "$LAST" ]; then
+            echo "Nothing to release."
+            exit 0
+          fi
+          psr version --no-commit --no-tag --no-push --no-vcs-release --skip-build
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+      - if: steps.next.outputs.version != ''
+        id: pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: release/next
+          delete-branch: true
+          commit-message: "chore(release): v${{ steps.next.outputs.version }}"
+          title: "chore(release): v${{ steps.next.outputs.version }}"
+          body: |
+            Prepared by python-semantic-release: `__version__` and CHANGELOG.md.
+            Edit the changelog on this branch if needed. Merging tags
+            v${{ steps.next.outputs.version }} and creates the GitHub release.
+
+            Checks run from a CI run this workflow starts on the release branch
+            (checks of a PR opened with the workflow token do not start by themselves). If they
+            are missing, run CI on release/next from the Actions tab.
+      # GitHub does not start (or holds for approval) the checks of a PR opened with
+      # the workflow token, but allows a workflow_dispatch run on its branch, whose
+      # checks report on the PR's head commit.
+      - if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run ci.yml --ref release/next
