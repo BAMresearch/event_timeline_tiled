@@ -2,6 +2,10 @@
 
 <!-- version list -->
 
+## v0.1.0 (2026-11-19)
+
+- Initial Release
+
 First release: a read-only Grafana timeline of Bluesky runs in Tiled.
 
 - Adapter: reads runs from Tiled with a read-only key (paged searches, never
