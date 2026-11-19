@@ -52,7 +52,7 @@
       "source": "url",
       "parser": "backend",
       "format": "table",
-      "url": "http://adapter:8000/presets",
+      "url": "/presets",
       "url_options": {
        "method": "GET",
        "data": ""
@@ -176,7 +176,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/queues?preset=${preset:percentencode}",
+     "url": "/queues?preset=${preset:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -509,7 +509,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/clips/status?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&unfold=${unfold:percentencode}",
+     "url": "/clips/status?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&unfold=${unfold:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -641,7 +641,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/clips/frame?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&unfold=${unfold:percentencode}",
+     "url": "/clips/frame?from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&unfold=${unfold:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1155,7 +1155,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=1",
+     "url": "/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1218,7 +1218,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=1",
+     "url": "/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1257,7 +1257,7 @@
      "source": "url",
      "parser": "backend",
      "format": "timeseries",
-     "url": "http://adapter:8000/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=2",
+     "url": "/selection/trend?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&max_points=2000&axis=2",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1359,7 +1359,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/runs?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&limit=50",
+     "url": "/selection/runs?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&limit=50",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1422,7 +1422,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/streams?uid=${run:percentencode}&root=${root:percentencode}",
+     "url": "/selection/streams?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1547,7 +1547,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}&root=${root:percentencode}&tz=${__timezone}",
+     "url": "/selection/run?uid=${run:percentencode}&root=${root:percentencode}&tz=${__timezone}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1614,7 +1614,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/runs?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&limit=50",
+     "url": "/selection/runs?uid=${run:percentencode}&root=${root:percentencode}&from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}&preset=${preset:percentencode}&lane=${lane:percentencode}&limit=50",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1860,7 +1860,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/run?uid=${run:percentencode}&root=${root:percentencode}",
+     "url": "/selection/run?uid=${run:percentencode}&root=${root:percentencode}",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -1982,7 +1982,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&axis=1",
+     "url": "/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2045,7 +2045,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&root=${root:percentencode}&max_points=2000",
+     "url": "/selection/curve?uid=${run:percentencode}&root=${root:percentencode}&max_points=2000",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2108,7 +2108,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&x=elapsed&axis=1",
+     "url": "/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&x=elapsed&axis=1",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2126,7 +2126,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&x=elapsed&axis=2",
+     "url": "/selection/data?uid=${run:percentencode}&root=${root:percentencode}&kind=timeseries&max_points=2000&x=elapsed&axis=2",
      "url_options": {
       "method": "GET",
       "data": ""
@@ -2242,7 +2242,7 @@
      "source": "url",
      "parser": "backend",
      "format": "table",
-     "url": "http://adapter:8000/selection/curve?uid=${run:percentencode}&root=${root:percentencode}&max_points=2000",
+     "url": "/selection/curve?uid=${run:percentencode}&root=${root:percentencode}&max_points=2000",
      "url_options": {
       "method": "GET",
       "data": ""

@@ -12,7 +12,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 GRAFANA = ROOT / "grafana"
 DASHBOARDS = sorted((GRAFANA / "dashboards").glob("*.json"))
-ADAPTER = "http://adapter:8000/"
+ADAPTER = "${ETT_ADAPTER_URL}"
+"""The datasource's URL; panel queries are paths below it (Infinity prefixes it)."""
 # Adapter endpoints dashboards may query (docs/technical/endpoints.md). The
 # selected run is read only through /selection/..., which accept an empty
 # selection; /runs/{uid}/... would fail on the dashboard's initial state.
@@ -56,7 +57,10 @@ def test_datasource_is_locked_to_the_adapter() -> None:
     ds = _datasources()["timeline-adapter"]
     assert ds["type"] == "yesoreyeram-infinity-datasource"
     assert ds["editable"] is False
-    assert ds["jsonData"]["allowedHosts"] == [ADAPTER]
+    assert ds["url"] == ADAPTER and ds["jsonData"]["allowedHosts"] == [ADAPTER + "/"]
+    # Compose always sets it: Grafana's provisioning has no default values.
+    compose = yaml.safe_load((GRAFANA.parent / "deploy" / "compose.yaml").read_text())
+    assert compose["services"]["grafana"]["environment"]["ETT_ADAPTER_URL"]
     assert "secureJsonData" not in ds  # no Tiled credential in Grafana
 
 
@@ -77,8 +81,8 @@ def test_dashboard_queries(path: Path) -> None:
             assert ds["uid"] in uids, f"unknown data source {ds['uid']}"
         if "url" in node and node.get("source") == "url":
             assert node["parser"] == "backend"
-            assert node["url"].startswith(ADAPTER)
-            path = node["url"][len(ADAPTER) - 1 :].split("?")[0]
+            assert node["url"].startswith("/"), "a path below the datasource's URL"
+            path = node["url"].split("?")[0]
             assert path in ENDPOINTS, path
             assert "${run" not in path, "the selected run goes in a query parameter"
             # Times go through Infinity's own macros, in seconds (plan §6.1).
@@ -120,7 +124,7 @@ def test_timeline_shows_whether_its_data_is_complete() -> None:
     timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
     [status] = [p for p in _panels(timeline) if p["title"] == "Data status"]
     [target] = status["targets"]
-    assert target["url"].startswith(ADAPTER + "clips/status?")
+    assert target["url"].startswith("/clips/status?")
     assert [c["selector"] for c in target["columns"]] == ["state", "message"]
     health = json.loads((GRAFANA / "dashboards" / "health.json").read_text())
     selected = {c["selector"] for p in _panels(health) for t in p["targets"] for c in t["columns"]}
@@ -288,3 +292,27 @@ def test_every_navigation_sets_each_variable_once() -> None:
     )
     [status] = [p for p in _panels(timeline) if p["title"] == "Data status"]
     assert "unfold=${unfold:percentencode}" in status["targets"][0]["url"]
+
+
+def test_stacks_without_the_demo_need_no_demo_settings() -> None:
+    """Compose interpolates every service, in an active profile or not: a
+    required (":?") or unset ("${X}") variable in a demo service would break
+    compose.yaml + compose.host.yaml on a host without deploy/.env."""
+    compose = yaml.safe_load((GRAFANA.parent / "deploy" / "compose.yaml").read_text())
+    for name, service in compose["services"].items():
+        if "demo" not in service.get("profiles", []):
+            continue
+        for text in _strings(service):
+            for match in re.finditer(r"\$\{([A-Z0-9_]+)([^}]*)\}", text):
+                assert match.group(2).startswith(":-"), f"{name}: {match.group(0)}"
+
+
+def _strings(node: Any) -> Any:
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for value in node.values():
+            yield from _strings(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _strings(value)

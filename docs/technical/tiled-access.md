@@ -106,6 +106,10 @@ ETT_SECRETS=/srv/event-timeline/secrets
 The directory is mounted read-only at `/secrets`. Never put the key in
 `.env`, a dashboard, a URL, a command line or a log.
 
+On a [single host](single-host.md) under rootless Podman, the adapter
+runs as the host user instead, and reads a mode-600 file owned by that user
+from wherever `ETT_TILED_KEY_FILE` points.
+
 ## 4. Check it before use
 
 `ett-check-access` runs in the adapter's image with the adapter's settings,
@@ -126,6 +130,13 @@ docker compose -f deploy/compose.yaml run --rm --no-deps adapter \
 | search, per catalogue root | the root can be searched |
 | `--run`: metadata and data | the run's metadata and a small piece of real data (the first table or array below it) can be read |
 | `--denied` | the node cannot be read (`401`, `403` or `404`) |
+
+A **single-user** Tiled (authentication required, no providers, no
+`/auth/whoami`) has one key, which can write; `key scopes` fails there.
+Until the server runs in multi-user mode, a deployment may knowingly use
+that key: `--accept-single-user-key` turns the failure into a pass that
+says the key can write. It is off by default, and ignored (with a note) on
+a multi-user server, where the scopes are checked as always.
 
 Give `--run` one recent measurement and one processing run from each
 catalogue root. With an access policy, also give `--denied` a run the

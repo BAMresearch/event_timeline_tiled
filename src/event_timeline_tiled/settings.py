@@ -15,7 +15,8 @@
   ``instrument=http:http://host:60610`` (Bluesky HTTP Server); empty: none.
   For HTTP, the API key (scopes ``read:status``, ``read:queue``) comes from
   the file named by ``ETT_QUEUE_<INSTRUMENT>_API_KEY_FILE`` (instrument in
-  upper case, other characters as ``_``).
+  upper case, other characters as ``_``), else by ``ETT_QUEUE_API_KEY_FILE``
+  (for every HTTP queue without its own; an empty file means no key).
 - ``ETT_PRESETS_DIR``: a directory of preset files (``*.yaml``), loaded at
   start besides the shipped ``instruments``; empty: none
   (docs/technical/presets.md).
@@ -127,6 +128,8 @@ def parse_queues(value: str, env: Mapping[str, str]) -> tuple[QueueConfig, ...]:
             raise ValueError(f"ETT_QUEUES entry {entry!r} is not instrument=zmq|http:address")
         key = None
         key_file = env.get(QueueConfig.env_name(match["name"]), "")
+        if not key_file and match["transport"] == "http":
+            key_file = env.get("ETT_QUEUE_API_KEY_FILE", "")
         if key_file:
             key = Path(key_file).read_text(encoding="utf-8").strip() or None
         configs.append(QueueConfig(match["name"], match["transport"], match["address"], key))

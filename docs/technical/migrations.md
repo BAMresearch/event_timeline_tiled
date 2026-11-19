@@ -151,3 +151,20 @@ Layout and electrochemistry (2026-11-18), all additive:
   Managers of the instruments the preset shows.
 - `deploy/presets/electrochemistry.yaml`: one lane per electrochemistry
   station.
+
+Single host (2026-11-19):
+
+- Panel queries are paths (`/clips/frame?...`); the Infinity datasource's
+  URL comes from `ETT_ADAPTER_URL` (set by `deploy/compose.yaml`, default
+  `http://adapter:8000`). A deployment with its own compose file must set
+  it for the Grafana container.
+- The proxy's address and upstreams are settings (`NGINX_LISTEN`,
+  `NGINX_GRAFANA`, `NGINX_ADAPTER`), with the old values as defaults in
+  `deploy/compose.yaml`.
+- New: `deploy/compose.host.yaml` ([single host](single-host.md)),
+  `ETT_QUEUE_API_KEY_FILE`, `ett-check-access --accept-single-user-key`
+  and `deploy/grafana_viewer.py`. Additive.
+- The demo's `POSTGRES_PASSWORD`, `TILED_ADMIN_PASSWORD` and
+  `TILED_SECRET_KEY` are no longer required when compose reads the file
+  (it reads every service, demo or not): without them the demo's Postgres
+  and Tiled refuse to start instead.

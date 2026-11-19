@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
 import time
@@ -38,7 +39,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 HERE = Path(__file__).parent
-COMPOSE = ["docker", "compose", "-f", str(HERE / "compose.yaml"), "--profile", "demo"]
+# ETT_COMPOSE: the compose command ("docker compose", or "docker-compose" for the
+# standalone binary); ETT_COMPOSE_FILES: colon-separated files below deploy/
+# (CI's single-host job adds compose.host.yaml and ci/compose.host-demo.yaml).
+COMPOSE = [
+    *os.environ.get("ETT_COMPOSE", "docker compose").split(),
+    *(arg for f in os.environ.get("ETT_COMPOSE_FILES", "compose.yaml").split(":")
+      for arg in ("-f", str(HERE / f))),
+    "--profile",
+    "demo",
+]  # fmt: skip
 
 
 def env_file() -> dict[str, str]:
@@ -121,7 +131,7 @@ def health_rows() -> list[dict[str, object]]:
                 "source": "url",
                 "parser": "backend",
                 "format": "table",
-                "url": "http://adapter:8000/health",
+                "url": "/health",
             }
         ],
         "from": "now-1h",
@@ -142,8 +152,10 @@ def health_rows() -> list[dict[str, object]]:
 # the request body follows Tiled 0.2.21's PostMetadataRequest.
 WRITE_PROBE = """
 import httpx
-key = open("/secrets/adapter.key").read().strip()
-r = httpx.post("http://tiled:8000/api/v1/metadata/",
+import os
+key = open(os.environ["ETT_TILED_API_KEY_FILE"]).read().strip()
+tiled = os.environ["ETT_TILED_URL"].rstrip("/")
+r = httpx.post(tiled + "/api/v1/metadata/",
                headers={"Authorization": "Apikey " + key},
                json={"structure_family": "container", "metadata": {}, "specs": []})
 print(r.status_code)
@@ -151,8 +163,10 @@ print(r.status_code)
 
 SAMPLE_RUNS = """
 import httpx
-key = open("/secrets/adapter.key").read().strip()
-r = httpx.get("http://tiled:8000/api/v1/search/", params={"page[limit]": 300, "fields": "metadata"},
+import os
+key = open(os.environ["ETT_TILED_API_KEY_FILE"]).read().strip()
+tiled = os.environ["ETT_TILED_URL"].rstrip("/")
+r = httpx.get(tiled + "/api/v1/search/", params={"page[limit]": 300, "fields": "metadata"},
               headers={"Authorization": "Apikey " + key})
 data = r.json()["data"] if r.status_code == 200 else []
 def first(test):
@@ -200,7 +214,7 @@ def panel_queries(
 
 QUEUES = """
 import httpx
-rows = httpx.get("http://localhost:8000/queues", timeout=30).json()
+rows = httpx.get("http://127.0.0.1:8000/queues", timeout=30).json()
 print(rows[0]["state"] if rows else "no RE Manager configured")
 """
 

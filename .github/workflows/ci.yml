@@ -123,3 +123,117 @@ jobs:
         run: |
           grep -qx 'event_timeline_tiled/presets/instruments.yaml' wheel.txt
           cd "$RUNNER_TEMP" && wheel/bin/python -c "from event_timeline_tiled.presets import load_registry; assert load_registry().default == 'instruments'"
+
+  stack-single-host:
+    # deploy/compose.host.yaml as on an instrument PC (docs/technical/single-host.md):
+    # rootless Podman, the standalone compose binary, everything on 127.0.0.1.
+    # The demo's Tiled and RE Manager stay on the stack's network, published on
+    # loopback (deploy/ci/compose.host-demo.yaml). Podman 4.9.3 from Ubuntu 24.04,
+    # and 4.6.2 from the Kubic repository on Ubuntu 22.04, as on the lab's hosts.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            podman: distribution
+          - os: ubuntu-22.04
+            podman: "4:4.6.2-0ubuntu22.04+obs81.12"
+    runs-on: ${{ matrix.os }}
+    env:
+      DOCKER_BUILDKIT: "0"
+      COMPOSE_VERSION: "5.6.1"
+      COMPOSE_SHA256: "47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0"
+      ETT_COMPOSE: docker-compose
+      ETT_COMPOSE_FILES: "compose.yaml:compose.host.yaml:ci/compose.host-demo.yaml"
+      ETT_ADAPTER_USER: "0:0"
+      ETT_TILED_URL: http://127.0.0.1:8001
+      ETT_QUEUES: MOUSE=zmq:tcp://127.0.0.1:60615
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Podman 4.6.2 from the Kubic repository
+        if: matrix.podman != 'distribution'
+        run: |
+          repo=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_22.04
+          curl -fsSL "$repo/Release.key" | gpg --dearmor | sudo tee /etc/apt/keyrings/kubic.gpg > /dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/kubic.gpg] $repo/ /" | sudo tee /etc/apt/sources.list.d/kubic.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q "podman=${{ matrix.podman }}"
+      - name: The standalone compose binary, pinned and checked
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/bin/docker-compose" \
+            "https://github.com/docker/compose/releases/download/v$COMPOSE_VERSION/docker-compose-linux-x86_64"
+          echo "$COMPOSE_SHA256  $RUNNER_TEMP/bin/docker-compose" | sha256sum -c
+          chmod +x "$RUNNER_TEMP/bin/docker-compose"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Settings with generated secrets
+        run: deploy/ci_settings.sh
+      - name: Rootless Podman's API socket
+        run: |
+          podman --version
+          podman info --format 'rootless={{.Host.Security.Rootless}} network={{.Host.NetworkBackend}}'
+          sock="$RUNNER_TEMP/podman.sock"
+          podman system service --time=0 "unix://$sock" > "$RUNNER_TEMP/podman.log" 2>&1 &
+          for _ in $(seq 30); do [ -S "$sock" ] && break; sleep 1; done
+          echo "DOCKER_HOST=unix://$sock" >> "$GITHUB_ENV"
+          docker-compose version
+      - name: Demo Tiled, seeders and RE Manager on the stack's network
+        run: |
+          docker-compose -f deploy/compose.yaml -f deploy/ci/compose.host-demo.yaml --profile demo \
+            up -d --build postgres tiled demo-bootstrap demo-seed demo-operando redis re-manager demo-queue
+      - name: The adapter's key as a mode-600 file of the runner's user
+        run: |
+          vol=$(podman volume inspect event-timeline-tiled_adapter-key --format '{{.Mountpoint}}')
+          umask 077
+          podman unshare cat "$vol/adapter.key" > "$RUNNER_TEMP/tiled.key"
+          echo "ETT_TILED_KEY_FILE=$RUNNER_TEMP/tiled.key" >> "$GITHUB_ENV"
+          stat -c '%a %U' "$RUNNER_TEMP/tiled.key"
+      - name: Proxy, Grafana and adapter on the host's network, as a launcher would
+        # A clean environment with only the launcher's settings and no deploy/.env
+        # (--env-file /dev/null): config, the one-off build and pull, then up
+        # without building or pulling (docs/technical/single-host.md).
+        run: |
+          admin=$(grep '^GF_ADMIN_PASSWORD=' deploy/.env | cut -d= -f2-)
+          launch() {
+            env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_HOST" DOCKER_BUILDKIT=0 \
+              GF_ADMIN_PASSWORD="$admin" ETT_TILED_URL="$ETT_TILED_URL" \
+              ETT_TILED_KEY_FILE="$ETT_TILED_KEY_FILE" ETT_ADAPTER_USER=0:0 \
+              ETT_QUEUES="$ETT_QUEUES" ETT_CATALOG_ROOTS= \
+              docker-compose --env-file /dev/null -f deploy/compose.yaml -f deploy/compose.host.yaml "$@"
+          }
+          launch config -q
+          launch build
+          launch pull proxy
+          launch up -d --no-build --pull never proxy grafana adapter
+      - name: Smoke test
+        run: uv run --locked python deploy/smoke_test.py
+      - name: Listening on loopback only
+        run: |
+          ss -ltnH | awk '{print $4}' | grep -E ':(8080|3000|8000)$' | sort | tee listening.txt
+          test "$(wc -l < listening.txt)" -eq 3
+          ! grep -v '^127\.0\.0\.1:' listening.txt
+      - name: A Viewer account, twice (idempotent)
+        run: |
+          umask 077
+          grep '^GF_ADMIN_PASSWORD=' deploy/.env | cut -d= -f2- > "$RUNNER_TEMP/admin.pw"
+          echo screen > "$RUNNER_TEMP/viewer.pw"
+          for _ in 1 2; do
+            python3 deploy/grafana_viewer.py --login screen \
+              --password-file "$RUNNER_TEMP/viewer.pw" --admin-password-file "$RUNNER_TEMP/admin.pw"
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -u screen:screen http://127.0.0.1:8080/api/user)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' -u screen:screen -H 'Content-Type: application/json' \
+            -d '{"title":"x"}' http://127.0.0.1:8080/api/folders)" = 403
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker-compose -f deploy/compose.yaml -f deploy/compose.host.yaml \
+            -f deploy/ci/compose.host-demo.yaml --profile demo ps -a
+          docker-compose -f deploy/compose.yaml -f deploy/compose.host.yaml \
+            -f deploy/ci/compose.host-demo.yaml --profile demo logs --tail 50
+      - name: Clean up
+        if: always()
+        run: |
+          docker-compose -f deploy/compose.yaml -f deploy/compose.host.yaml \
+            -f deploy/ci/compose.host-demo.yaml --profile demo down -v || true

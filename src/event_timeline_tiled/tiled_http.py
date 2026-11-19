@@ -151,6 +151,19 @@ class TiledReader:
             return None
         return version if isinstance(version, str) else None
 
+    def single_user(self) -> bool | None:
+        """Whether Tiled runs in single-user mode: authentication required and no
+        providers (one shared key, which can write). ``None`` if unknown. Never raises."""
+        try:
+            response = self._http.get("/")
+            response.raise_for_status()
+            auth = _json_object(response).get("authentication")
+        except httpx.HTTPError, MalformedResponse:
+            return None
+        if not isinstance(auth, dict) or not isinstance(auth.get("providers"), list):
+            return None
+        return auth.get("required") is True and not auth["providers"]
+
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """GET ``/api/v1{path}`` and return the JSON object, or raise :class:`SourceError`."""
         try:

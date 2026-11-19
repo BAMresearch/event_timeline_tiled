@@ -19,7 +19,10 @@ services:
     environment:
       # The resolver from the container's /etc/resolv.conf, whatever the runtime.
       NGINX_ENTRYPOINT_LOCAL_RESOLVERS: "1"
-      NGINX_ENVSUBST_FILTER: "^NGINX_LOCAL_RESOLVERS$$"
+      NGINX_ENVSUBST_FILTER: "^NGINX_(LOCAL_RESOLVERS|LISTEN|GRAFANA|ADAPTER)$$"
+      NGINX_LISTEN: "8080"
+      NGINX_GRAFANA: grafana:3000
+      NGINX_ADAPTER: adapter:8000
     volumes:
       - ./proxy/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     ports:
@@ -32,6 +35,8 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:?set GF_ADMIN_PASSWORD in deploy/.env}
       GF_SERVER_ROOT_URL: ${ETT_PUBLIC_URL:-http://localhost:8080/}
+      # The adapter as Grafana reaches it (the datasource's URL).
+      ETT_ADAPTER_URL: http://adapter:8000
     volumes:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
       - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -66,7 +71,10 @@ services:
     image: docker.io/library/postgres:16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
     environment:
       POSTGRES_USER: tiled
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      # Not ":?": compose interpolates every service, active profile or not, so a
+      # required demo variable would break stacks without the demo (single host).
+      # Empty, the postgres image refuses to initialise (set it in deploy/.env).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     volumes:
       - ./tiled/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
       - postgres-data:/var/lib/postgresql/data
@@ -82,9 +90,10 @@ services:
       dockerfile: deploy/python.Dockerfile
       target: tiled
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      TILED_ADMIN_PASSWORD: ${TILED_ADMIN_PASSWORD:?set TILED_ADMIN_PASSWORD in deploy/.env}
-      TILED_SECRET_KEY: ${TILED_SECRET_KEY:?set TILED_SECRET_KEY in deploy/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      # Empty or weak, deploy/tiled/entrypoint.py refuses to start (see POSTGRES_PASSWORD).
+      TILED_ADMIN_PASSWORD: ${TILED_ADMIN_PASSWORD:-}
+      TILED_SECRET_KEY: ${TILED_SECRET_KEY:-}
     volumes:
       - tiled-files:/data/files
       - processed:/data/processed:ro
@@ -114,7 +123,7 @@ services:
               "--key-dir", "adapter=/keys/adapter", "--key-dir", "seeder=/keys/seeder",
               "--owner", "10001:10001", "--chown-dir", "/data/processed"]
     environment:
-      TILED_ADMIN_PASSWORD: ${TILED_ADMIN_PASSWORD}
+      TILED_ADMIN_PASSWORD: ${TILED_ADMIN_PASSWORD:-}
     user: root
     volumes:
       - adapter-key:/keys/adapter

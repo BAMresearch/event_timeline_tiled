@@ -117,6 +117,18 @@ def test_http_key_comes_from_a_file(tmp_path: Any) -> None:
     assert config.api_key == "secret-key" and "secret-key" not in repr(config)
 
 
+def test_the_shared_key_file_serves_http_queues_without_their_own(tmp_path: Any) -> None:
+    shared, own = tmp_path / "shared.key", tmp_path / "own.key"
+    shared.write_text("shared-key\n")
+    own.write_text("own-key\n")
+    env = {"ETT_QUEUE_API_KEY_FILE": str(shared), "ETT_QUEUE_B_API_KEY_FILE": str(own)}
+    configs = parse_queues("A=http:http://h:1, B=http:http://h:2, C=zmq:tcp://h:3", env)
+    assert [c.api_key for c in configs] == ["shared-key", "own-key", None]
+    # An empty file (compose.host.yaml mounts /dev/null without a key): no key.
+    [none] = parse_queues("A=http:http://h:1", {"ETT_QUEUE_API_KEY_FILE": "/dev/null"})
+    assert none.api_key is None
+
+
 def test_queues_endpoint() -> None:
     settings = Settings(tiled_url="http://tiled.test", tiled_api_key="k", queues=(ZMQ,))
     with TestClient(create_app(settings, queue_api=lambda _c: FakeAPI())) as client:
