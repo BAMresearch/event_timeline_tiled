@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
@@ -11,7 +12,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 GRAFANA = ROOT / "grafana"
 DASHBOARDS = sorted((GRAFANA / "dashboards").glob("*.json"))
-ADAPTER = "http://adapter:8000/"
+ADAPTER = "${ETT_ADAPTER_URL}"
+"""The datasource's URL; panel queries are paths below it (Infinity prefixes it)."""
 # Adapter endpoints dashboards may query (docs/technical/endpoints.md). The
 # selected run is read only through /selection/..., which accept an empty
 # selection; /runs/{uid}/... would fail on the dashboard's initial state.
@@ -55,7 +57,10 @@ def test_datasource_is_locked_to_the_adapter() -> None:
     ds = _datasources()["timeline-adapter"]
     assert ds["type"] == "yesoreyeram-infinity-datasource"
     assert ds["editable"] is False
-    assert ds["jsonData"]["allowedHosts"] == [ADAPTER]
+    assert ds["url"] == ADAPTER and ds["jsonData"]["allowedHosts"] == [ADAPTER + "/"]
+    # Compose always sets it: Grafana's provisioning has no default values.
+    compose = yaml.safe_load((GRAFANA.parent / "deploy" / "compose.yaml").read_text())
+    assert compose["services"]["grafana"]["environment"]["ETT_ADAPTER_URL"]
     assert "secureJsonData" not in ds  # no Tiled credential in Grafana
 
 
@@ -76,8 +81,8 @@ def test_dashboard_queries(path: Path) -> None:
             assert ds["uid"] in uids, f"unknown data source {ds['uid']}"
         if "url" in node and node.get("source") == "url":
             assert node["parser"] == "backend"
-            assert node["url"].startswith(ADAPTER)
-            path = node["url"][len(ADAPTER) - 1 :].split("?")[0]
+            assert node["url"].startswith("/"), "a path below the datasource's URL"
+            path = node["url"].split("?")[0]
             assert path in ENDPOINTS, path
             assert "${run" not in path, "the selected run goes in a query parameter"
             # Times go through Infinity's own macros, in seconds (plan §6.1).
@@ -119,7 +124,7 @@ def test_timeline_shows_whether_its_data_is_complete() -> None:
     timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
     [status] = [p for p in _panels(timeline) if p["title"] == "Data status"]
     [target] = status["targets"]
-    assert target["url"].startswith(ADAPTER + "clips/status?")
+    assert target["url"].startswith("/clips/status?")
     assert [c["selector"] for c in target["columns"]] == ["state", "message"]
     health = json.loads((GRAFANA / "dashboards" / "health.json").read_text())
     selected = {c["selector"] for p in _panels(health) for t in p["targets"] for c in t["columns"]}
@@ -129,16 +134,28 @@ def test_timeline_shows_whether_its_data_is_complete() -> None:
 def test_time_series_puts_other_units_on_a_second_axis() -> None:
     """Axis 1: fields in the first field's units; axis 2, on the right: the rest.
     Generic: no field names or units in the dashboard."""
-    timeline = json.loads((GRAFANA / "dashboards" / "timeline.json").read_text())
-    panels = [p for p in _panels(timeline) if p["type"] == "timeseries"]
-    assert {p["title"].split(":")[0] for p in panels} == {"Run time series", "Trend"}
-    for panel in panels:
-        axes = {t["refId"]: t["url"].rsplit("axis=", 1)[1] for t in panel["targets"]}
-        assert axes == {"A": "1", "B": "2"}
-        [right] = panel["fieldConfig"]["overrides"]
-        assert right["matcher"] == {"id": "byFrameRefID", "options": "B"}
-        assert right["properties"] == [{"id": "custom.axisPlacement", "value": "right"}]
-        assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.labels.series}"
+    for name in ("timeline.json", "overview.json"):
+        dashboard = json.loads((GRAFANA / "dashboards" / name).read_text())
+        panels = [p for p in _panels(dashboard) if p["type"] in ("timeseries", "xychart")
+                  and any("axis=" in t.get("url", "") for t in p["targets"])]  # fmt: skip
+        assert {p["title"].split(":")[0] for p in panels} == {"Run time series", "Trend"}
+        for panel in panels:
+            axes = {
+                t["refId"]: parse_qs(urlsplit(t["url"]).query)["axis"] for t in panel["targets"]
+            }
+            assert axes == {"A": ["1"], "B": ["2"]}
+            right = [o for o in panel["fieldConfig"]["overrides"]
+                     if o["matcher"] == {"id": "byFrameRefID", "options": "B"}]  # fmt: skip
+            assert len(right) == 1
+            assert {"id": "custom.axisPlacement", "value": "right"} in right[0]["properties"]
+            if panel["type"] == "timeseries":
+                assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.labels.series}"
+                continue
+            # The run's time series: against the time since its start, wide rows.
+            assert all("x=elapsed" in t["url"] and not t["columns"] for t in panel["targets"])
+            assert panel["options"]["series"] == [
+                {"x": {"matcher": {"id": "byName", "options": "elapsed_s"}}}
+            ]
 
 
 # Columns the adapter may return as null (docs/technical/endpoints.md), per table.
@@ -275,3 +292,27 @@ def test_every_navigation_sets_each_variable_once() -> None:
     )
     [status] = [p for p in _panels(timeline) if p["title"] == "Data status"]
     assert "unfold=${unfold:percentencode}" in status["targets"][0]["url"]
+
+
+def test_stacks_without_the_demo_need_no_demo_settings() -> None:
+    """Compose interpolates every service, in an active profile or not: a
+    required (":?") or unset ("${X}") variable in a demo service would break
+    compose.yaml + compose.host.yaml on a host without deploy/.env."""
+    compose = yaml.safe_load((GRAFANA.parent / "deploy" / "compose.yaml").read_text())
+    for name, service in compose["services"].items():
+        if "demo" not in service.get("profiles", []):
+            continue
+        for text in _strings(service):
+            for match in re.finditer(r"\$\{([A-Z0-9_]+)([^}]*)\}", text):
+                assert match.group(2).startswith(":-"), f"{name}: {match.group(0)}"
+
+
+def _strings(node: Any) -> Any:
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for value in node.values():
+            yield from _strings(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _strings(value)

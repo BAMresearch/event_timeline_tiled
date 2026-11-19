@@ -77,8 +77,10 @@ ETT_QUEUE_MOUSE_API_KEY_FILE=/secrets/mouse-queue.key
 The variable name is `ETT_QUEUE_<INSTRUMENT>_API_KEY_FILE`, with the
 instrument in upper case and other characters replaced by `_`. Pass it to
 the adapter container (add it under the adapter's `environment` in
-`deploy/compose.yaml` for your deployment). The key is never sent to Grafana
-or the browser.
+`deploy/compose.yaml` for your deployment). `ETT_QUEUE_API_KEY_FILE` names
+one key file for every HTTP queue without its own variable (an empty file:
+no key); [single host](single-host.md) uses it. The key is never sent to
+Grafana or the browser.
 
 ## Demo stack
 

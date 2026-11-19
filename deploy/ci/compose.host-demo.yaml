@@ -1,0 +1,7 @@
+# CI only: the demo stack's Tiled and RE Manager for compose.host.yaml's
+# loopback adapter. Tiled is already published on 127.0.0.1:8001; this
+# publishes the RE Manager's control port there too.
+services:
+  re-manager:
+    ports:
+      - "127.0.0.1:60615:60615"

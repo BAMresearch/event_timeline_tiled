@@ -9,7 +9,10 @@ checks the key's scopes as Tiled reports them, which is what Tiled enforces.
 Checks, each printed as PASS/FAIL with a status (never the key):
 
 1. the key file is readable and Tiled accepts the key;
-2. the key's scopes are exactly ``read:metadata`` and ``read:data``;
+2. the key's scopes are exactly ``read:metadata`` and ``read:data``. A
+   single-user Tiled (authentication required, no providers, no
+   ``/auth/whoami``) has one key, which can write: this check fails there
+   unless ``--accept-single-user-key`` acknowledges it, and then says so;
 3. every configured catalogue root can be searched;
 4. for each ``--run PATH``: its metadata and a small piece of real data
    (the first array or table below it) can be read;
@@ -25,7 +28,7 @@ import sys
 from collections.abc import Callable
 
 from .settings import Settings, _roots
-from .tiled_http import TiledReader
+from .tiled_http import KeyInfo, TiledReader
 
 READ_SCOPES = frozenset({"read:metadata", "read:data"})
 
@@ -36,7 +39,10 @@ def run_checks(
     denied: list[str],
     reader: TiledReader,
     out: Callable[[str], None] = print,
+    accept_single_user: bool = False,
 ) -> bool:
+    """Run the checks; ``accept_single_user`` acknowledges a single-user
+    server's write-capable key (and changes nothing on other servers)."""
     results: list[bool] = []
 
     def check(name: str, ok: bool, detail: str) -> None:
@@ -44,7 +50,25 @@ def run_checks(
         out(f"{'PASS' if ok else 'FAIL'}  {name}: {detail}")
 
     key = reader.whoami_key(settings.tiled_api_key[:8])
-    check("key accepted", key.status == 200, f"HTTP {key.status}")
+    if key.status == 404 and reader.single_user():
+        # No /auth/whoami to report scopes: show that the key reads, then
+        # refuse its write rights unless they were knowingly accepted.
+        status = reader.metadata_status("")
+        check("key accepted", status == 200, f"HTTP {status} (single-user Tiled)")
+        check(
+            "key scopes",
+            accept_single_user,
+            "single-user Tiled: its one key can write; ACCEPTED with --accept-single-user-key"
+            if accept_single_user
+            else "single-user Tiled: its one key can write, and the adapter needs a read-only "
+            "key (multi-user Tiled, docs/technical/tiled-access.md); to use it knowingly "
+            "until then, pass --accept-single-user-key",
+        )
+        key = KeyInfo(0, None)  # scopes handled above
+    else:
+        check("key accepted", key.status == 200, f"HTTP {key.status}")
+        if accept_single_user:
+            out("NOTE  --accept-single-user-key ignored: not a single-user Tiled")
     if key.status == 200:
         scopes = frozenset(key.scopes or ())
         extra, missing = sorted(scopes - READ_SCOPES), sorted(READ_SCOPES - scopes)
@@ -79,6 +103,9 @@ def main(argv: list[str] | None = None) -> None:
                    help="a run the key must be able to read (repeatable)")  # fmt: skip
     p.add_argument("--denied", action="append", default=[], metavar="PATH",
                    help="a node the key must not be able to read (repeatable)")  # fmt: skip
+    p.add_argument("--accept-single-user-key", action="store_true",
+                   help="on a single-user Tiled, accept its one key although it can write "
+                        "(until a read-only key exists); off by default")  # fmt: skip
     args = p.parse_args(argv)
     paths = [*args.run, *args.denied]
     try:
@@ -91,7 +118,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(f"FAIL  settings: {type(exc).__name__}: {exc}")
     reader = TiledReader(settings)
     try:
-        ok = run_checks(settings, args.run, args.denied, reader)
+        ok = run_checks(settings, args.run, args.denied, reader,
+                        accept_single_user=args.accept_single_user_key)  # fmt: skip
     finally:
         reader.close()
     sys.exit(0 if ok else 1)

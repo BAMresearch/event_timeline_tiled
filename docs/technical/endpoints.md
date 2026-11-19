@@ -45,10 +45,12 @@ The live check and the window fetch are separate: the check can pass while
 the (filtered) window search fails. `/clips/status` is what the Timeline
 page shows.
 
-## `GET /queues`
+## `GET /queues[?preset]`
 
 One row per RE Manager in `ETT_QUEUES` ([queue status](queues.md)), read at
-request time; `[]` if none is configured.
+request time; `[]` if none is configured. With `preset`, only the managers
+whose instrument the preset's `scope` predicates on `start.instrument` admit
+(all of them if it has none); an unknown preset is a 422.
 
 | Field | Meaning |
 |---|---|
@@ -181,17 +183,22 @@ fixed height then never draws a single lane as one huge bar.
 
 The frame says nothing about completeness; that is `/clips/status`.
 
-## `GET /runs/{uid}`
+## `GET /runs/{uid}[?tz]`
 
 ```json
-{"run": {...}, "summary": [{"key": "...", "value": ...}],
+{"run": {...}, "summary": [{"key": "...", "value": ..., "text": "..."}],
  "metadata": [{"document": "start", "key": "a.b", "value": ...}], "metadata_truncated": false}
 ```
 
 `run` holds `uid`, `start_uid`, `uid_mismatch`, `root`, `lane`, `role`,
 `status`, `reason`, `label`, `plan_name`, `start`, `stop`, `duration_s`,
 `last_event`, `last_event_age_s`, `possibly_stalled`, `activity_error`;
-`summary` is the same as key/value rows.
+`summary` is the same as key/value rows, the run's state first (`status`,
+`reason`, …, `activity_error`), then the other keys. Each row's `text` is
+its value for reading: `start`, `stop` and `last_event` as
+`2026-11-18 14:51:47 CET` in the time zone `tz` (an IANA name, such as
+Grafana's `${__timezone}`; empty or `utc`: UTC; unknown: 422), keys ending in
+`_s` as durations (`12 min 3 s`), booleans as `yes`/`no`, `null` as empty.
 
 `metadata` flattens the start and stop documents with dotted keys, up to 8
 levels; deeper values are JSON text. Lists of scalars are joined with `, `
@@ -253,7 +260,7 @@ processing runs: `corrected_curve` (`corrected_1d`: `Q`, `I`) is the
 default, then `corrected_image` (`corrected_2d`: `image`). A processing run
 that published neither gets the fallback views.
 
-## `GET /runs/{uid}/data?view|kind&max_points&axis`
+## `GET /runs/{uid}/data?view|kind&max_points&axis[&x]`
 
 Rows of one view (default view if `view` is omitted). Every response has a
 `notice`: one line saying what is shown (and what is not).
@@ -269,6 +276,12 @@ Rows of one view (default view if `view` is omitted). Every response has a
   `axis=1` returns only the fields in the units of the view's first field,
   `axis=2` all others (other units or none), for a second y axis; without
   `axis`, all fields. Ignored by other kinds.
+  `x=elapsed` (default `x=time`): wide rows against the time since the run
+  started, `{"x": "elapsed", "start", "series": [...], "rows": [{"elapsed_s",
+  "<series>": value, ...}], ...}`, one row per event and one column per
+  series, sorted by `elapsed_s`. `start` is the start document's time (else
+  the first event's), in epoch seconds. The same fields, `axis` and
+  decimation; for an XY chart, whose x need not be the dashboard's range.
   `max_points` (10–20000, default 2000) bounds the **rows** returned, over
   all fields: each field gets `max_points // fields` events, every k-th from
   the first and always the last. With more fields than `max_points`, only
@@ -439,10 +452,10 @@ link, a run from another server): it gets a message, not `404`.
 
 | Endpoint | With a selection | With `uid=` empty |
 |---|---|---|
-| `/selection/run?uid` | `{"selected": true, "found": true, "run", "summary", "metadata", "metadata_truncated"}` as `/runs/{uid}` | `{"selected": false, "found": false, "summary": [{"key": "run", "value": "Select a run …"}], "metadata": [], "metadata_truncated": false}` |
+| `/selection/run?uid[&tz]` | `{"selected": true, "found": true, "run", "summary", "metadata", "metadata_truncated"}` as `/runs/{uid}` | `{"selected": false, "found": false, "summary": [{"key": "run", "value": "Select a run …"}], "metadata": [], "metadata_truncated": false}` |
 | `/selection/streams?uid` | as `/runs/{uid}/streams` | `[]` |
 | `/selection/fields?uid&stream` | as `/runs/{uid}/streams/{stream}/fields` | `[]` (also with `stream=` empty) |
-| `/selection/data?uid&view|kind&max_points&axis` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
+| `/selection/data?uid&view|kind&max_points&axis[&x]` | as `/runs/{uid}/data` | no rows, `notice` "Select a run …" |
 | `/selection/trend?uid&from&to&max_points&axis` | as `/runs/{uid}/trend` | no rows, `notice` "Select a run …" |
 | `/selection/related?uid` | as `/runs/{uid}/related` | no rows, `role` and `default` `null`, `notice` "Select a run …" |
 | `/selection/curve?uid&view&max_points` | as `/runs/{uid}/curve` | no rows, `notice` "Select a run …" |

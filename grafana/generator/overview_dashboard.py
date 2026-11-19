@@ -15,8 +15,8 @@ LINKS = tp.Links(UID)
 
 def header() -> list[Panel]:
     """A narrow row: what this is, the queues, whether the data is complete."""
-    return [tp.help_text((0, 0, 5, 3), LINKS), tp.queue((5, 0, 11, 3)),
-            tp.data_status((16, 0, 8, 3))]  # fmt: skip
+    return [tp.help_text((0, 0, 5, 4), LINKS, legend=False), tp.queue((5, 0, 11, 4)),
+            tp.data_status((16, 0, 8, 4))]  # fmt: skip
 
 
 def selected_run() -> list[Panel]:
@@ -25,10 +25,10 @@ def selected_run() -> list[Panel]:
     metadata."""
     return [
         tp.lane_runs_notice((0, 0, 8, 2)),
-        tp.lane_runs((0, 2, 8, 10), LINKS),
-        tp.streams((8, 0, 8, 12), LINKS, fields_below=False),
-        tp.selected_run((16, 0, 8, 4)),
-        tp.metadata((16, 4, 8, 8)),
+        tp.lane_runs((0, 2, 8, 12), LINKS),
+        tp.streams((8, 0, 7, 14), LINKS, fields_below=False, compact=True),
+        tp.selected_run((15, 0, 9, 6)),
+        tp.metadata((15, 6, 9, 8), key_width=180),
     ]
 
 

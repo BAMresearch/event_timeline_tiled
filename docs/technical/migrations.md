@@ -138,3 +138,33 @@ Presets, step 8 part 4 (2026-11-18):
   the top to the selected run further down; *Timeline* (`ett-timeline`)
   stays. Each links to the other in its top bar, keeping the time range and
   the variables. Additive.
+
+Layout and electrochemistry (2026-11-18), all additive:
+
+- `/runs/{uid}` and `/selection/run` take `tz` and give each `summary` row a
+  `text` (readable times and durations); the summary rows list the run's
+  state first. *Selected run* shows `text`, in the viewer's time zone.
+- `/runs/{uid}/data` and `/selection/data` take `x=elapsed`: wide rows
+  against the time since the run's start. *Run time series* is now an XY
+  chart against that time, so a short run fills it whatever the range.
+- `/queues` takes `preset`: the dashboards' *Queue* shows only the RE
+  Managers of the instruments the preset shows.
+- `deploy/presets/electrochemistry.yaml`: one lane per electrochemistry
+  station.
+
+Single host (2026-11-19):
+
+- Panel queries are paths (`/clips/frame?...`); the Infinity datasource's
+  URL comes from `ETT_ADAPTER_URL` (set by `deploy/compose.yaml`, default
+  `http://adapter:8000`). A deployment with its own compose file must set
+  it for the Grafana container.
+- The proxy's address and upstreams are settings (`NGINX_LISTEN`,
+  `NGINX_GRAFANA`, `NGINX_ADAPTER`), with the old values as defaults in
+  `deploy/compose.yaml`.
+- New: `deploy/compose.host.yaml` ([single host](single-host.md)),
+  `ETT_QUEUE_API_KEY_FILE`, `ett-check-access --accept-single-user-key`
+  and `deploy/grafana_viewer.py`. Additive.
+- The demo's `POSTGRES_PASSWORD`, `TILED_ADMIN_PASSWORD` and
+  `TILED_SECRET_KEY` are no longer required when compose reads the file
+  (it reads every service, demo or not): without them the demo's Postgres
+  and Tiled refuse to start instead.

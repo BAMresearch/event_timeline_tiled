@@ -10,6 +10,9 @@ Scenarios:
   acquiring through the RunEngine: one MOUSE measurement at a time
   (``baseline``, ``snapshot``, three ``mouse_eiger_measure`` readings
   ``--interval`` seconds apart), each followed by a processing run.
+  Also, if the catalogue holds no electrochemistry runs, a day of
+  electrochemistry-bluesky-like runs on one station: run sheets in sequence,
+  with a calibration every few hours.
 - ``operando``: a second, generic instrument with a run that started three
   days ago and never closes, receiving a reading every ``--interval``
   seconds. Runs until stopped; start it as a separate process.
@@ -112,6 +115,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.scenario == "operando":
         operando(fw, now, args.interval)
         return
+    if args.scenario == "demo":
+        if len(client.search(Key("start.instrument") == ECHEM)) > 0:
+            print("seed: catalogue already holds electrochemistry runs; not rewritten")
+        else:
+            n = electrochemistry_history(fw, now, rng)
+            print(f"seed: wrote {n} electrochemistry runs")
     if args.scenario == "window":
         manifest = window_scenario(fw, args.t0)
     elif len(client.search(Key("start.instrument") == "MOUSE")) > 0:
@@ -124,6 +133,33 @@ def main(argv: list[str] | None = None) -> None:
         args.manifest.write_text(json.dumps(manifest, indent=1))
     if args.scenario == "demo" and args.live:
         live(fw, args.interval)
+
+
+ECHEM = "electrochemistry-k2460"
+
+
+def electrochemistry_history(fw: FixtureWriter, now: float, rng: random.Random) -> int:
+    """A day of run sheets on one station, one at a time (one sample at a
+    time): each ``run_sequence`` run discharges a little further than the last,
+    so the trend over them falls; a ``calibrate`` run every fifth."""
+    t = now - DAY
+    count = 0
+    while t < now - HOUR:
+        count += 1
+        md = {"instrument": ECHEM, "station": "bench-a", "sample_id": "S-cell-02"}
+        if count % 5 == 1:
+            fw.electrochemistry_run(
+                {**md, "measurement_id": f"cal-{count:03d}", "plan_name": "calibrate"},
+                t, t + 300, n_events=5, level=1.0,
+            )  # fmt: skip
+            t += 300 + 60
+        duration = rng.uniform(35, 45) * 60
+        fw.electrochemistry_run(
+            {**md, "measurement_id": f"sheet-{count:03d}", "plan_name": "run_sequence"},
+            t, t + duration, n_events=40, level=4.1 - 0.02 * count, drop=0.3,
+        )  # fmt: skip
+        t += duration + rng.uniform(3, 10) * 60
+    return count
 
 
 def operando(fw: FixtureWriter, now: float, interval: float) -> None:

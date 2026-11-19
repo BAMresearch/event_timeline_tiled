@@ -157,3 +157,10 @@ def test_check_access_flags_extra_scopes() -> None:
     assert not ok
     assert any(line.startswith("FAIL  key scopes") and "remove register" in line for line in lines)
     assert not any("abcdefgh-rest" in line for line in lines)
+
+    # The single-user acknowledgement changes nothing on a multi-user server.
+    lines.clear()
+    reader = TiledReader(settings, transport=httpx.MockTransport(handler))
+    assert not run_checks(settings, [], [], reader, lines.append, accept_single_user=True)
+    assert any(line.startswith("NOTE  --accept-single-user-key ignored") for line in lines)
+    assert any(line.startswith("FAIL  key scopes") for line in lines)

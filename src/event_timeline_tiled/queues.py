@@ -184,9 +184,10 @@ class QueueMonitor:
     clock: Callable[[], float] = time.time
     _states: dict[str, _State] = field(init=False, factory=dict)
 
-    def rows(self) -> list[dict[str, Any]]:
-        """One row per configured RE Manager, queried now."""
-        return [self._row(config) for config in self.configs]
+    def rows(self, admits: Callable[[str], bool] = lambda _: True) -> list[dict[str, Any]]:
+        """One row per configured RE Manager whose instrument ``admits``
+        accepts, queried now."""
+        return [self._row(config) for config in self.configs if admits(config.instrument)]
 
     def _row(self, config: QueueConfig) -> dict[str, Any]:
         state = self._states.setdefault(config.instrument, _State())

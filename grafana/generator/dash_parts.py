@@ -13,7 +13,9 @@ from typing import Any
 Panel = dict[str, Any]
 
 DS = {"type": "yesoreyeram-infinity-datasource", "uid": "timeline-adapter"}
-ADAPTER = "http://adapter:8000"
+ADAPTER = ""
+"""Panel URLs are paths: Infinity 4.1.6 prefixes the datasource's URL
+(``ETT_ADAPTER_URL``, grafana/provisioning/datasources/adapter.yaml)."""
 RANGE = "from=${__timeFrom:date:seconds}&to=${__timeTo:date:seconds}"
 """The dashboard's time range in epoch seconds, as the adapter takes it."""
 RUN = "uid=${run:percentencode}&root=${root:percentencode}"

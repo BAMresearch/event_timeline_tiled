@@ -90,30 +90,40 @@ def status_cells(name: str) -> dict[str, Any]:
                    prop("mappings", MAPPINGS))  # fmt: skip
 
 
-def help_text(pos: Pos, links: Links) -> Panel:
+COLOURS = (
+    "Green success · red failed · orange aborted · blue open · yellow possibly "
+    "stalled · light blue activity unknown · grey stale."
+)
+
+
+def help_text(pos: Pos, links: Links, legend: bool = True) -> Panel:
+    """What this is; ``legend=False`` leaves the colours to the timeline's ⓘ."""
+    colours = f"{COLOURS} " if legend else "Colours: see the timeline's ⓘ. "
     return text("", pos, "markdown",
                 "**Recorded runs from Tiled.** Click a run to select or unfold its lane. "
-                "Green success · red failed · orange aborted · blue open · yellow possibly "
-                "stalled · light blue activity unknown · grey stale. "
-                f"[Fold]({links.fold}) · [Health](/d/ett-health/timeline-health)",
+                f"{colours}[Fold]({links.fold}) · [Health](/d/ett-health/timeline-health)",
                 transparent=True)  # fmt: skip
 
 
 def queue(pos: Pos) -> Panel:
     return panel("table", "Queue", pos,
-              [target(f"{A}/queues", "", [
+              [target(f"{A}/queues?{PRESET}", "", [
                   col("instrument"), col("state"), col("running_plan"),
                   col("running_since", "timestamp_epoch_s"), col("items_in_queue", "number"),
                   col("run_progress", "number"), col("run_text")])],
-              description="Each RE Manager's state and running plan. Progress counts the plans "
+              description="Each RE Manager's state and running plan, for the instruments the "
+                          "preset shows. Progress counts the plans "
                           "finished since the queue started (or since the dashboard's adapter "
                           "first saw it running), against those plus the plans still queued: "
                           "plans, not time; the history before the run does not count.",
               options={"showHeader": True, "cellHeight": "sm"},
-              fieldConfig={"defaults": {"noValue": "no RE Manager configured"}, "overrides": [
+              fieldConfig={"defaults": {"noValue": "no RE Manager for these instruments",
+                                        "custom": {"minWidth": 60}}, "overrides": [
                   width("items_in_queue", 64), width("instrument", 80),
-                  width("running_since", 150), width("state", 115), width("run_progress", 100),
-                  width("run_text", 70),
+                  width("running_since", 100), width("state", 105), width("run_progress", 100),
+                  width("run_text", 60),
+                  by_name("running_since", prop("unit", "dateTimeFromNow"),
+                          prop("displayName", "since")),
                   by_name("items_in_queue", prop("displayName", "queued")),
                   by_name("run_text", prop("displayName", "run")),
                   by_name("run_progress", prop("displayName", "progress"),
@@ -160,12 +170,16 @@ def lane_runs(pos: Pos, links: Links) -> Panel:
                   col("label"), col("plan_name"), col("start", "timestamp_epoch_s"),
                   col("status"), col("uid"), col("root"), col("lane_id")])],
               description="The selected lane's latest runs, newest first, each once (the "
-                          "line above names the lane); before a selection, the preset's runs.",
+                          "line above names the lane); before a selection, the preset's runs. "
+                          "Started: how long ago.",
               options={"showHeader": True, "cellHeight": "sm"},
-              fieldConfig={"defaults": {"noValue": "no runs"}, "overrides": [
+              fieldConfig={"defaults": {"noValue": "no runs", "custom": {"minWidth": 60}},
+                           "overrides": [
                   hidden_column("uid"), hidden_column("root"), hidden_column("lane_id"),
                   link("label", "Select run", links.select_lane_run), status_cells("status"),
-                  width("status", 80), width("start", 160), *blank("plan_name")]})  # fmt: skip
+                  width("status", 75), width("start", 110), *blank("plan_name"),
+                  by_name("start", prop("unit", "dateTimeFromNow"),
+                          prop("displayName", "started"))]})  # fmt: skip
 
 
 def lane_runs_notice(pos: Pos) -> Panel:
@@ -174,14 +188,19 @@ def lane_runs_notice(pos: Pos) -> Panel:
 
 def selected_run(pos: Pos) -> Panel:
     return panel("table", "Selected run", pos,
-              [target(f"{A}/selection/run?{RUN}", "summary", [col("key"), col("value")])],
-              description="The selected run's state: status, duration, reason, activity.",
+              [target(f"{A}/selection/run?{RUN}&tz=${{__timezone}}", "summary",
+                      [col("key"), col("text")])],
+              description="The selected run's state (status, reason, duration, activity), "
+                          "then where it is: uid, root, lane, role.",
               options={"showHeader": False, "cellHeight": "sm"},
               fieldConfig={"defaults": {}, "overrides": [width("key", 140)]})  # fmt: skip
 
 
-def streams(pos: Pos, links: Links, fields_below: bool = True) -> Panel:
+def streams(pos: Pos, links: Links, fields_below: bool = True, compact: bool = False) -> Panel:
+    """``compact``: the last event as how long ago, leaving the width to the names."""
     title = "Show fields (below the timeline)" if fields_below else "Select stream"
+    last_event = ([width("last_event", 100), by_name("last_event", prop("unit", "dateTimeFromNow"))]
+                  if compact else [width("last_event", 160)])  # fmt: skip
     return panel("table", "Streams", pos,
               [target(f"{A}/selection/streams?{RUN}", "", [
                   col("stream"), col("events", "number"),
@@ -189,7 +208,7 @@ def streams(pos: Pos, links: Links, fields_below: bool = True) -> Panel:
               options={"showHeader": True},
               fieldConfig={"defaults": {"noValue": "no run selected, or no streams"},
                            "overrides": [
-                  width("events", 70), width("last_event", 160), *blank("last_event"),
+                  width("events", 55 if compact else 70), *last_event, *blank("last_event"),
                   link("stream", title, links.stream)]})  # fmt: skip
 
 
@@ -210,10 +229,33 @@ def run_data(pos: Pos) -> list[Panel]:
 
 
 def run_time_series(pos: Pos) -> Panel:
-    # Two queries: fields in the first field's units (left axis), the others (right).
-    return two_axes(
-        "Run time series", pos, f"{A}/selection/data?{RUN}&kind=timeseries&max_points=2000", NOTHING
-    )
+    """Against the time since the run's start, so a short run fills the panel
+    whatever the dashboard's range. Two queries: fields in the first field's
+    units (left axis), the others (right); wide rows, one column per series.
+    An XY chart: the trend panel takes one frame only, and joining frames
+    would take a dashboard transformation."""
+    url = f"{A}/selection/data?{RUN}&kind=timeseries&max_points=2000&x=elapsed"
+    queries = [dict(target(f"{url}&axis={axis}", "rows"), refId=ref)
+               for axis, ref in ((1, "A"), (2, "B"))]  # fmt: skip
+    return panel("xychart", "Run time series", pos, queries,
+              description="The selected run's time series view against the time since its "
+                          "start: the whole run, whatever the dashboard's time range.",
+              options={"mapping": "auto",
+                       "series": [{"x": {"matcher": {"id": "byName", "options": "elapsed_s"}}}],
+                       "legend": {"showLegend": True, "displayMode": "list",
+                                  "placement": "bottom"},
+                       "tooltip": {"mode": "multi"}},
+              # The XY chart keys each y scale by unit: "none" and "short" (both
+              # plain numbers) give the two queries their own axes.
+              fieldConfig={"defaults": {"noValue": NOTHING, "displayName": "${__field.name}",
+                                        "custom": {"show": "lines", "lineWidth": 1}},
+                           "overrides": [
+                  {"matcher": {"id": "byFrameRefID", "options": "A"},
+                   "properties": [prop("unit", "none")]},
+                  {"matcher": {"id": "byFrameRefID", "options": "B"},
+                   "properties": [prop("unit", "short"), prop("custom.axisPlacement", "right")]},
+                  by_name("elapsed_s", prop("unit", "s"), prop("displayName", "since start"),
+                          prop("custom.axisPlacement", "auto"))]})  # fmt: skip
 
 
 def run_time_series_notice(pos: Pos) -> Panel:
@@ -236,6 +278,9 @@ def timeline(pos: Pos, links: Links) -> Panel:
                   col("activity_error"), col("lane_id"), col("track"), col("root"),
                   col("stream"), col("stream_from_ms", "number"),
                   col("stream_to_ms", "number")])],
+              description="One lane per row of the preset; a run may appear on several. "
+                          f"{COLOURS} Click a run to select it, zoom to it, or unfold its "
+                          "lane into one row per stream.",
               transformations=[{"id": "partitionByValues", "options": {
                   "fields": ["lane"], "keepFields": False, "naming": {"asLabels": True}}}],
               options={"mergeValues": False, "showValue": "never", "alignValue": "left",
@@ -330,7 +375,7 @@ def trend(pos: Pos, title: str) -> Panel:
                                 "runs.")  # fmt: skip
 
 
-def metadata(pos: Pos) -> Panel:
+def metadata(pos: Pos, key_width: int = 280) -> Panel:
     return panel("table", "Run metadata", pos,
               [target(f"{A}/selection/run?{RUN}", "metadata", [
                   col("document"), col("key"), col("value")])],
@@ -338,7 +383,7 @@ def metadata(pos: Pos) -> Panel:
                           "(nested keys dotted). Long values end in … where they were cut.",
               options={"showHeader": True, "cellHeight": "sm"},
               fieldConfig={"defaults": {"noValue": "no run selected"}, "overrides": [
-                  width("document", 90), width("key", 280), *blank("value"),
+                  width("document", 90), width("key", key_width), *blank("value"),
                   by_name("value", prop("custom.wrapText", True))]})  # fmt: skip
 
 

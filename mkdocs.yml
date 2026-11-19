@@ -8,6 +8,7 @@ nav:
       - Overview: technical/index.md
       - Endpoints: technical/endpoints.md
       - Demo stack: technical/demo-stack.md
+      - Single host: technical/single-host.md
       - Tiled access: technical/tiled-access.md
       - Queue status: technical/queues.md
       - Presets: technical/presets.md

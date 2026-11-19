@@ -36,7 +36,7 @@
           "source": "url",
           "parser": "backend",
           "format": "table",
-          "url": "http://adapter:8000/health",
+          "url": "/health",
           "url_options": {
             "method": "GET",
             "data": ""

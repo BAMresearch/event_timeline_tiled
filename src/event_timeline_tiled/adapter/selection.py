@@ -24,8 +24,11 @@ from .common import (
     ROOT,
     SELECTED,
     TO,
+    TZ,
     VIEW,
+    X_AXIS,
     check_window,
+    zone,
 )
 from .metadata import metadata_rows
 from .results import Results, no_curve
@@ -40,16 +43,17 @@ def router(adapter: Adapter, runs: Runs, trends: Trends, results: Results) -> AP
     api = APIRouter(prefix="/selection")
 
     @api.get("/run")
-    def selected_run(uid: SELECTED = "", root: ROOT = None) -> dict[str, Any]:
+    def selected_run(uid: SELECTED = "", root: ROOT = None, tz: TZ = "") -> dict[str, Any]:
         chosen = adapter.selection(uid, root)
         if chosen.run is None:
             return {"selected": bool(uid), "found": False,
-                    "summary": [{"key": "run", "value": chosen.notice}],
+                    "summary": [{"key": "run", "value": chosen.notice,
+                                 "text": chosen.notice}],
                     "metadata": [], "metadata_truncated": False}  # fmt: skip
         summary = runs.summary(chosen.run)
         metadata, truncated = metadata_rows(chosen.run)
         return {"selected": True, "found": True, "run": summary,
-                "summary": summary_rows(summary),
+                "summary": summary_rows(summary, zone(tz)),
                 "metadata": metadata, "metadata_truncated": truncated}  # fmt: skip
 
     @api.get("/streams")
@@ -72,13 +76,14 @@ def router(adapter: Adapter, runs: Runs, trends: Trends, results: Results) -> AP
         max_points: MAX_POINTS = 2000,
         axis: AXIS = None,
         root: ROOT = None,
+        x: X_AXIS = "time",
     ) -> dict[str, Any]:
         if view and kind:
             raise HTTPException(422, "give view or kind, not both")
         chosen = adapter.selection(uid, root)
         if chosen.run is None:
             return {"view": None, "rows": [], "truncated": False, "notice": chosen.notice}
-        return runs.data(chosen.run, view, kind, max_points, axis)
+        return runs.data(chosen.run, view, kind, max_points, axis, x)
 
     @api.get("/trend")
     def selected_trend(

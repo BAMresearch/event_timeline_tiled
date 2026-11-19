@@ -54,12 +54,16 @@ key:
 - Live, through the RunEngine as in the history: one MOUSE measurement at a
   time (`baseline`, `snapshot`, three `mouse_eiger_measure` readings a
   minute apart), each followed by a processing run (one in six fails).
+- A day of electrochemistry on one station (`bench-a`), one run at a time:
+  run sheets (`run_sequence`, 40 `readout` readings, each discharging a little
+  further than the last) and a `calibrate` run before every fifth. Shown by
+  the `electrochemistry` preset from `deploy/presets/`.
 - A generic second instrument (`demo-operando`, its own RunEngine) with a
   run that started three days ago and stays open, receiving a reading every
   15 s (an operando-style experiment).
 
-History is written only if the catalogue holds no MOUSE runs, so restarts
-do not duplicate it; each restart of `demo-operando` opens a new run. The
+History is written only if the catalogue holds no MOUSE runs (the
+electrochemistry day: none of its runs), so restarts do not duplicate it; each restart of `demo-operando` opens a new run. The
 three Tiled secrets in `deploy/.env` must be at least 16 characters of
 letters, digits, `-` and `_` (Tiled refuses to start otherwise). `down -v`
 discards everything.
