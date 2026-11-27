@@ -61,7 +61,9 @@ def env_file() -> dict[str, str]:
 
 
 ENV = env_file()
-BASE = f"http://127.0.0.1:{ENV.get('ETT_HTTP_PORT', '8080')}"
+PORT = ENV.get("ETT_HTTP_PORT", "8080")
+BASE = f"http://127.0.0.1:{PORT}"
+SESSION_COOKIE = f"grafana_session_{PORT}"  # one per stack (compose.yaml)
 AUTH = "Basic " + base64.b64encode(f"admin:{ENV['GF_ADMIN_PASSWORD']}".encode()).decode()
 
 
@@ -292,7 +294,8 @@ def main() -> None:
         check(f"overview lists the latest runs, {name}", latest > 0, f"{latest} rows")
 
     cookie = session_cookie()
-    check("signed in through Grafana's login", bool(cookie))
+    names = [part.split("=", 1)[0] for part in cookie.split("; ") if part]
+    check("signed in through Grafana's login", SESSION_COOKIE in names, ", ".join(names))
     status, kind, body = image(f"/run-images/{run}/image?size=128", cookie)
     check("corrected image through the signed-in route",
           status == 200 and kind == "image/png" and body.startswith(b"\x89PNG"),

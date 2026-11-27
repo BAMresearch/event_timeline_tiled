@@ -114,7 +114,7 @@ command line.
 | `ETT_CATALOG_ROOTS` | containers holding runs; empty: the server root |
 | `ETT_QUEUES` | `MOUSE=http:http://127.0.0.1:60610` ([queue status](queues.md)) |
 | `ETT_QUEUE_KEY_FILE` | **host** path of the Bluesky HTTP Server key (scopes `read:status`, `read:queue`); used for every `http` queue |
-| `ETT_HTTP_PORT`, `ETT_GRAFANA_PORT`, `ETT_ADAPTER_PORT` | 8080, 3000, 8000 |
+| `ETT_HTTP_PORT`, `ETT_GRAFANA_PORT`, `ETT_ADAPTER_PORT` | 8080, 3000, 8000; `ETT_HTTP_PORT` also names Grafana's session cookie |
 | `ETT_PUBLIC_URL` | Grafana's root URL; default `http://127.0.0.1:<ETT_HTTP_PORT>/` |
 | `ETT_PRESETS`, `ETT_DEFAULT_PRESET` | the preset directory (default `deploy/presets`) and the starting preset |
 
@@ -154,6 +154,19 @@ python3 deploy/grafana_viewer.py --login <name> \
 Grafana's password policy is off in this stack, so a password needs only 4
 characters; the account is a Viewer of the main organisation and never a
 server admin. Grafana keeps no anonymous access.
+
+## Two stacks on one host
+
+Each stack needs its own project name (`COMPOSE_PROJECT_NAME`) and its own
+three ports. A browser keeps cookies per host name, not per port, so
+Grafana's session cookie is named after the stack's port,
+`grafana_session_<ETT_HTTP_PORT>`: one browser can be signed in to both
+stacks at once. Grafana (13.3.1) names its `grafana_session_expiry` cookie
+itself, so the two stacks share that one; it only tells the page when to
+renew its session, and the worst it causes is an early renewal.
+
+Before this cookie had its own name, every stack used `grafana_session`:
+after the update, everyone signs in once more.
 
 ## Security notes
 
