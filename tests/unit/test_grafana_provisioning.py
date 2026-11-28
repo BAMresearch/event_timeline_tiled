@@ -64,6 +64,14 @@ def test_datasource_is_locked_to_the_adapter() -> None:
     assert "secureJsonData" not in ds  # no Tiled credential in Grafana
 
 
+def test_each_stack_has_its_own_session_cookie() -> None:
+    """Browsers keep cookies per host, not per port: two stacks on one host
+    with Grafana's default cookie name sign each other out."""
+    compose = yaml.safe_load((GRAFANA.parent / "deploy" / "compose.yaml").read_text())
+    name = compose["services"]["grafana"]["environment"]["GF_AUTH_LOGIN_COOKIE_NAME"]
+    assert name == "grafana_session_${ETT_HTTP_PORT:-8080}"
+
+
 def test_dashboard_providers_are_read_only() -> None:
     for f in (GRAFANA / "provisioning" / "dashboards").glob("*.yaml"):
         for provider in yaml.safe_load(f.read_text())["providers"]:
