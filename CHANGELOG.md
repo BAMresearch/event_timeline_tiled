@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.1 (2026-11-28)
+
+### Bug Fixes
+
+- Give each stack its own Grafana session cookie
+  ([`a785f29`](https://github.com/BAMresearch/event_timeline_tiled/commit/a785f293b85f5a1d03089a7b16bc49ea2430c954))
+
+
 ## v0.1.0 (2026-11-19)
 
 - Initial Release
